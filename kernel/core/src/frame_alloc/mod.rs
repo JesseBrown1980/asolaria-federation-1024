@@ -153,8 +153,15 @@ mod tests {
     fn alloc_one_byte_rounds_to_full_page() {
         reset_for_tests();
         let p = alloc_pages(1).expect("first single-byte alloc must succeed");
-        assert_eq!(p as usize, VIRTUAL_BASE_START, "first alloc returns virtual base");
-        assert_eq!(used_bytes(), PAGE_BYTES, "one-byte request consumes one full page");
+        assert_eq!(
+            p as usize, VIRTUAL_BASE_START,
+            "first alloc returns virtual base"
+        );
+        assert_eq!(
+            used_bytes(),
+            PAGE_BYTES,
+            "one-byte request consumes one full page"
+        );
     }
 
     #[test]
@@ -226,6 +233,10 @@ mod tests {
     fn alloc_then_free_round_trip_succeeds() {
         reset_for_tests();
         let p = alloc_pages(8192).expect("alloc must succeed");
-        assert_eq!(free_pages(p, 8192), Ok(()), "free of fresh alloc must succeed (no-op)");
+        assert_eq!(
+            free_pages(p, 8192),
+            Ok(()),
+            "free of fresh alloc must succeed (no-op)"
+        );
     }
 }

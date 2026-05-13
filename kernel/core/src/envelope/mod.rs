@@ -84,7 +84,10 @@ impl RouteHint {
 /// v0.2: lock-free push via `crossbeam_queue::ArrayQueue` adapted for no_std.
 /// v0.2.1: still stub at the header-typed API — the bytes-oriented sibling
 /// `dispatch_enqueue_bytes` is the live FULL-wire path consumed by syscalls.
-pub fn dispatch_enqueue(_header: &EnvelopeHeader<'_>, _route: RouteHint) -> Result<(), EnvelopeErr> {
+pub fn dispatch_enqueue(
+    _header: &EnvelopeHeader<'_>,
+    _route: RouteHint,
+) -> Result<(), EnvelopeErr> {
     Err(EnvelopeErr::Unimplemented)
 }
 
@@ -143,7 +146,12 @@ pub fn dispatch_enqueue_bytes(env: &[u8], route_hint: u32) -> Result<(), Envelop
     }
     // Claim the slot: EMPTY -> WRITING.
     if SLOT_STATE
-        .compare_exchange(STATE_EMPTY, STATE_WRITING, Ordering::AcqRel, Ordering::Acquire)
+        .compare_exchange(
+            STATE_EMPTY,
+            STATE_WRITING,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        )
         .is_err()
     {
         return Err(EnvelopeErr::QueueFull);
@@ -175,7 +183,11 @@ pub fn dispatch_enqueue_bytes(env: &[u8], route_hint: u32) -> Result<(), Envelop
 pub fn dispatch_dequeue_bytes(buf: &mut [u8], max_wait_ns: u64) -> Result<usize, EnvelopeErr> {
     // Bounded spin: estimate ~1 iteration per nanosecond worst case; cap to avoid
     // unbounded busy-wait. Without a kernel timer this is best-effort only.
-    let spin_budget: u64 = if max_wait_ns == 0 { 1 } else { max_wait_ns.min(1_000_000) };
+    let spin_budget: u64 = if max_wait_ns == 0 {
+        1
+    } else {
+        max_wait_ns.min(1_000_000)
+    };
     let mut tries: u64 = 0;
     loop {
         // Claim the slot: FULL -> READING.

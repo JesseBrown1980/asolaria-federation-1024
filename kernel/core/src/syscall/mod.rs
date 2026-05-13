@@ -369,9 +369,22 @@ pub fn sys_gnn_infer(input: &[u8], out: &mut [u8]) -> Result<usize, SyscallErr> 
 /// Compile-time enforcement: this list MUST equal exactly 16 entries.
 /// Adding any syscall here without a tier-2 cosign in AUTHORIZATION.ndjson violates Invariant 9.
 pub const CANONICAL_SYSCALLS: [&str; 16] = [
-    "read", "write", "exec", "fork", "exit", "mmap", "munmap", "time",
-    "pid_current", "envelope_send", "envelope_recv", "hookwall_pre",
-    "hookwall_post", "cosign_append", "tier_query", "gnn_infer",
+    "read",
+    "write",
+    "exec",
+    "fork",
+    "exit",
+    "mmap",
+    "munmap",
+    "time",
+    "pid_current",
+    "envelope_send",
+    "envelope_recv",
+    "hookwall_pre",
+    "hookwall_post",
+    "cosign_append",
+    "tier_query",
+    "gnn_infer",
 ];
 
 #[cfg(test)]
@@ -414,13 +427,19 @@ mod tests {
     #[test]
     fn sys_munmap_rejects_null_pointer() {
         // Phase-3 v0.1.7: input-validation half-wire.
-        assert_eq!(sys_munmap(core::ptr::null_mut(), 4096), Err(SyscallErr::Invalid));
+        assert_eq!(
+            sys_munmap(core::ptr::null_mut(), 4096),
+            Err(SyscallErr::Invalid)
+        );
     }
 
     #[test]
     fn sys_munmap_rejects_zero_length() {
         let mut byte: u8 = 0;
-        assert_eq!(sys_munmap(&mut byte as *mut u8, 0), Err(SyscallErr::Invalid));
+        assert_eq!(
+            sys_munmap(&mut byte as *mut u8, 0),
+            Err(SyscallErr::Invalid)
+        );
     }
 
     #[test]
@@ -430,7 +449,11 @@ mod tests {
         // releasing the same page twice ALSO succeeds (bitmap reclaim lands v0.2).
         crate::frame_alloc::reset_for_tests();
         let p = sys_mmap(4096, 0x3).expect("sys_mmap must allocate");
-        assert_eq!(sys_munmap(p, 4096), Ok(()), "sys_munmap of a fresh allocation must succeed");
+        assert_eq!(
+            sys_munmap(p, 4096),
+            Ok(()),
+            "sys_munmap of a fresh allocation must succeed"
+        );
     }
 
     #[test]
@@ -438,7 +461,10 @@ mod tests {
         // A stack-resident byte is non-null + non-zero-len but outside the synthetic
         // virtual range. Frame allocator maps InvalidPointer → SyscallErr::Invalid.
         let mut byte: u8 = 0;
-        assert_eq!(sys_munmap(&mut byte as *mut u8, 4096), Err(SyscallErr::Invalid));
+        assert_eq!(
+            sys_munmap(&mut byte as *mut u8, 4096),
+            Err(SyscallErr::Invalid)
+        );
     }
 
     #[test]
@@ -511,9 +537,16 @@ mod tests {
         crate::frame_alloc::reset_for_tests();
         let p = sys_mmap(4096, 0x3).expect("sys_mmap of one page with prot=R|W must succeed");
         assert!(!p.is_null(), "sys_mmap must return non-null on success");
-        assert_eq!((p as usize) % 4096, 0, "returned pointer must be page-aligned");
+        assert_eq!(
+            (p as usize) % 4096,
+            0,
+            "returned pointer must be page-aligned"
+        );
         let p2 = sys_mmap(8192, 0x7).expect("second sys_mmap (two pages, prot=R|W|X) must succeed");
-        assert!((p2 as usize) > (p as usize), "second alloc address must be higher than first");
+        assert!(
+            (p2 as usize) > (p as usize),
+            "second alloc address must be higher than first"
+        );
         // Round-trip via sys_munmap.
         assert_eq!(sys_munmap(p, 4096), Ok(()));
         assert_eq!(sys_munmap(p2, 8192), Ok(()));
@@ -585,7 +618,11 @@ mod tests {
         // may have already bumped the counter).
         let row = [0u8; 16];
         let seq = sys_cosign_append(&row).expect("valid 16-byte row must append");
-        assert!(seq >= 1, "first append must return a sequence number ≥ 1, got {}", seq);
+        assert!(
+            seq >= 1,
+            "first append must return a sequence number ≥ 1, got {}",
+            seq
+        );
     }
 
     #[test]
@@ -629,7 +666,11 @@ mod tests {
         let after = crate::agent_runtime::spawn_child_agent_count();
         match res {
             Ok(_) => {
-                assert_eq!(after, before + 1, "child counter must increment by exactly 1 on Ok");
+                assert_eq!(
+                    after,
+                    before + 1,
+                    "child counter must increment by exactly 1 on Ok"
+                );
             }
             Err(SyscallErr::Exhausted) => {
                 // Saturated state: counter already pinned at AGENT_REGISTRY_MAX; no increment.

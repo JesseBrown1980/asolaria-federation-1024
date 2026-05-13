@@ -12,34 +12,34 @@
 //! - `cosign_chain` — append-only sha-linked verdict ledger (Phase-3 Step 45)
 
 #![no_std]
-#![forbid(unsafe_code)]  // syscall + envelope dispatch + PID minter must be unsafe-free at API layer
+#![forbid(unsafe_code)] // syscall + envelope dispatch + PID minter must be unsafe-free at API layer
 #![warn(missing_docs)]
 
 extern crate alloc;
 
-pub mod pid;
-pub mod envelope;
 pub mod crypto;
-pub mod hookwall;
-pub mod syscall;
+pub mod envelope;
 pub mod frame_alloc;
+pub mod hookwall;
+pub mod pid;
+pub mod syscall;
 // Phase-2.5 cycle-72: demote was premature — kernel modules must remain present-and-callable
 // until Syscall-IPC-Rewire converts each call site to envelope RPC. Servers/* mirrors at
 // servers/{cosign-ledger,tier-policy,highway,agent-runtime,gnn-oracle}/src/lib.rs are the
 // forward targets; rewire moves call sites one-by-one without breaking the kernel build.
-pub mod cosign_chain;
-pub mod tier;
-pub mod highway;
 pub mod agent_runtime;
-pub mod gnn;
-pub mod bus_fabric;
-pub mod glyph_genesis;
-pub mod bus_and_kick;
-pub mod sign_gate;
-pub mod cycle_orch;
 pub mod atlas;
-pub mod transit;
+pub mod bus_and_kick;
+pub mod bus_fabric;
+pub mod cosign_chain;
+pub mod cycle_orch;
+pub mod glyph_genesis;
+pub mod gnn;
+pub mod highway;
+pub mod sign_gate;
+pub mod tier;
 pub mod tier_gate;
+pub mod transit;
 
 /// Kernel version string. Bumped on tier-2 cosign-approved ABI changes.
 pub const KERNEL_VERSION: &str = "0.2.0-phase3-scaffold";

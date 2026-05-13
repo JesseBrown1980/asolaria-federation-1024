@@ -133,12 +133,30 @@ mod tests {
 
     #[test]
     fn public_caller_allows_public_and_restricted_denies_rest() {
-        assert_eq!(check(AccessTier::Public, AccessTier::Public), TierGateVerdict::Allow);
-        assert_eq!(check(AccessTier::Public, AccessTier::Restricted), TierGateVerdict::Allow);
-        assert_eq!(check(AccessTier::Public, AccessTier::Stealth), TierGateVerdict::Deny);
-        assert_eq!(check(AccessTier::Public, AccessTier::Hidden), TierGateVerdict::Deny);
-        assert_eq!(check(AccessTier::Public, AccessTier::Shadow), TierGateVerdict::Deny);
-        assert_eq!(check(AccessTier::Public, AccessTier::Secret), TierGateVerdict::Deny);
+        assert_eq!(
+            check(AccessTier::Public, AccessTier::Public),
+            TierGateVerdict::Allow
+        );
+        assert_eq!(
+            check(AccessTier::Public, AccessTier::Restricted),
+            TierGateVerdict::Allow
+        );
+        assert_eq!(
+            check(AccessTier::Public, AccessTier::Stealth),
+            TierGateVerdict::Deny
+        );
+        assert_eq!(
+            check(AccessTier::Public, AccessTier::Hidden),
+            TierGateVerdict::Deny
+        );
+        assert_eq!(
+            check(AccessTier::Public, AccessTier::Shadow),
+            TierGateVerdict::Deny
+        );
+        assert_eq!(
+            check(AccessTier::Public, AccessTier::Secret),
+            TierGateVerdict::Deny
+        );
         // tier_can_access mirror:
         assert!(tier_can_access(AccessTier::Public, AccessTier::Restricted));
         assert!(!tier_can_access(AccessTier::Public, AccessTier::Hidden));
@@ -146,36 +164,93 @@ mod tests {
 
     #[test]
     fn restricted_caller_allows_through_stealth_escalates_higher() {
-        assert_eq!(check(AccessTier::Restricted, AccessTier::Public), TierGateVerdict::Allow);
-        assert_eq!(check(AccessTier::Restricted, AccessTier::Restricted), TierGateVerdict::Allow);
-        assert_eq!(check(AccessTier::Restricted, AccessTier::Stealth), TierGateVerdict::Allow);
-        assert_eq!(check(AccessTier::Restricted, AccessTier::Hidden), TierGateVerdict::Escalate);
-        assert_eq!(check(AccessTier::Restricted, AccessTier::Shadow), TierGateVerdict::Escalate);
-        assert_eq!(check(AccessTier::Restricted, AccessTier::Secret), TierGateVerdict::Escalate);
+        assert_eq!(
+            check(AccessTier::Restricted, AccessTier::Public),
+            TierGateVerdict::Allow
+        );
+        assert_eq!(
+            check(AccessTier::Restricted, AccessTier::Restricted),
+            TierGateVerdict::Allow
+        );
+        assert_eq!(
+            check(AccessTier::Restricted, AccessTier::Stealth),
+            TierGateVerdict::Allow
+        );
+        assert_eq!(
+            check(AccessTier::Restricted, AccessTier::Hidden),
+            TierGateVerdict::Escalate
+        );
+        assert_eq!(
+            check(AccessTier::Restricted, AccessTier::Shadow),
+            TierGateVerdict::Escalate
+        );
+        assert_eq!(
+            check(AccessTier::Restricted, AccessTier::Secret),
+            TierGateVerdict::Escalate
+        );
     }
 
     #[test]
     fn stealth_and_hidden_callers_allow_same_or_lower_escalate_higher() {
         // Stealth
-        assert_eq!(check(AccessTier::Stealth, AccessTier::Public), TierGateVerdict::Allow);
-        assert_eq!(check(AccessTier::Stealth, AccessTier::Stealth), TierGateVerdict::Allow);
-        assert_eq!(check(AccessTier::Stealth, AccessTier::Hidden), TierGateVerdict::Escalate);
-        assert_eq!(check(AccessTier::Stealth, AccessTier::Secret), TierGateVerdict::Escalate);
+        assert_eq!(
+            check(AccessTier::Stealth, AccessTier::Public),
+            TierGateVerdict::Allow
+        );
+        assert_eq!(
+            check(AccessTier::Stealth, AccessTier::Stealth),
+            TierGateVerdict::Allow
+        );
+        assert_eq!(
+            check(AccessTier::Stealth, AccessTier::Hidden),
+            TierGateVerdict::Escalate
+        );
+        assert_eq!(
+            check(AccessTier::Stealth, AccessTier::Secret),
+            TierGateVerdict::Escalate
+        );
         // Hidden
-        assert_eq!(check(AccessTier::Hidden, AccessTier::Restricted), TierGateVerdict::Allow);
-        assert_eq!(check(AccessTier::Hidden, AccessTier::Hidden), TierGateVerdict::Allow);
-        assert_eq!(check(AccessTier::Hidden, AccessTier::Shadow), TierGateVerdict::Escalate);
-        assert_eq!(check(AccessTier::Hidden, AccessTier::Secret), TierGateVerdict::Escalate);
+        assert_eq!(
+            check(AccessTier::Hidden, AccessTier::Restricted),
+            TierGateVerdict::Allow
+        );
+        assert_eq!(
+            check(AccessTier::Hidden, AccessTier::Hidden),
+            TierGateVerdict::Allow
+        );
+        assert_eq!(
+            check(AccessTier::Hidden, AccessTier::Shadow),
+            TierGateVerdict::Escalate
+        );
+        assert_eq!(
+            check(AccessTier::Hidden, AccessTier::Secret),
+            TierGateVerdict::Escalate
+        );
     }
 
     #[test]
     fn shadow_and_secret_callers_allow_lower_or_equal_deny_higher_no_escalation() {
         // Shadow: Allow up to Shadow, Deny Secret + Sovereignty (no escalation path).
-        assert_eq!(check(AccessTier::Shadow, AccessTier::Public), TierGateVerdict::Allow);
-        assert_eq!(check(AccessTier::Shadow, AccessTier::Hidden), TierGateVerdict::Allow);
-        assert_eq!(check(AccessTier::Shadow, AccessTier::Shadow), TierGateVerdict::Allow);
-        assert_eq!(check(AccessTier::Shadow, AccessTier::Secret), TierGateVerdict::Deny);
-        assert_eq!(check(AccessTier::Shadow, AccessTier::Sovereignty), TierGateVerdict::Deny);
+        assert_eq!(
+            check(AccessTier::Shadow, AccessTier::Public),
+            TierGateVerdict::Allow
+        );
+        assert_eq!(
+            check(AccessTier::Shadow, AccessTier::Hidden),
+            TierGateVerdict::Allow
+        );
+        assert_eq!(
+            check(AccessTier::Shadow, AccessTier::Shadow),
+            TierGateVerdict::Allow
+        );
+        assert_eq!(
+            check(AccessTier::Shadow, AccessTier::Secret),
+            TierGateVerdict::Deny
+        );
+        assert_eq!(
+            check(AccessTier::Shadow, AccessTier::Sovereignty),
+            TierGateVerdict::Deny
+        );
         // Secret: Allow all lower-or-equal; Deny Sovereignty (cycle-72 — was Allow all when only 6 tiers).
         for &t in &ALL_TIERS {
             if t == AccessTier::Sovereignty {
@@ -188,7 +263,8 @@ mod tests {
                 assert_eq!(
                     check(AccessTier::Secret, t),
                     TierGateVerdict::Allow,
-                    "Secret caller should Allow target {:?}", t
+                    "Secret caller should Allow target {:?}",
+                    t
                 );
             }
         }
@@ -204,11 +280,14 @@ mod tests {
         // Cycle-72 canon: Sovereignty is operator-physical-only / NEVER agent-driven.
         // No quintuple-cosign override exists. Even Secret-tier caller is Denied.
         for &c in &ALL_TIERS {
-            if c == AccessTier::Sovereignty { continue; }
+            if c == AccessTier::Sovereignty {
+                continue;
+            }
             assert_eq!(
                 check(c, AccessTier::Sovereignty),
                 TierGateVerdict::Deny,
-                "{:?} caller must be Denied Sovereignty target (no escalation)", c
+                "{:?} caller must be Denied Sovereignty target (no escalation)",
+                c
             );
         }
     }
@@ -221,7 +300,8 @@ mod tests {
             assert_eq!(
                 check(AccessTier::Sovereignty, t),
                 TierGateVerdict::Allow,
-                "Sovereignty caller should Allow target {:?}", t
+                "Sovereignty caller should Allow target {:?}",
+                t
             );
         }
     }

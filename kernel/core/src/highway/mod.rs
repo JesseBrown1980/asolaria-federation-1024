@@ -6,10 +6,10 @@
 //! Per REPO_LAW Invariant 5 + Invariant 4: every transit appends a row to the cosign-chain so
 //! tier-changes are auditable end-to-end.
 
-use alloc::string::String;
 use crate::cosign_chain::CosignChain;
 use crate::syscall::AccessTier;
 use crate::tier::{policy_for, quintuple_auth_covers};
+use alloc::string::String;
 
 /// Highway transit errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,7 +50,9 @@ pub fn check_transit(from: AccessTier, to: AccessTier) -> Result<TransitVerdict,
             from,
             to,
             authorized: false,
-            deny_reason: Some(String::from("destination tier not in current quintuple-auth window")),
+            deny_reason: Some(String::from(
+                "destination tier not in current quintuple-auth window",
+            )),
             cosign_row: None,
         });
     }
@@ -104,7 +106,12 @@ mod tests {
     #[test]
     fn execute_stub_returns_unimplemented() {
         let mut chain = CosignChain::new();
-        let r = execute_transit(&mut chain, AccessTier::Public, AccessTier::Restricted, "res-0");
+        let r = execute_transit(
+            &mut chain,
+            AccessTier::Public,
+            AccessTier::Restricted,
+            "res-0",
+        );
         assert_eq!(r, Err(HighwayErr::Unimplemented));
     }
 }

@@ -13,11 +13,11 @@
 //!
 //! v0.1 scaffold: API surface + in-memory row storage. Real ndjson-writer + gc lands in Phase-3 wave.
 
+use crate::crypto::Signature;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 use sha2::{Digest, Sha256};
-use crate::crypto::Signature;
 
 /// Genesis row identifier — `prev_sha16` of row 1.
 pub const GENESIS_PREV_SHA16: &str = "0000000000000000";

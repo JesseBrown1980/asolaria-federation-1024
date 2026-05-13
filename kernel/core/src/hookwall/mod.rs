@@ -9,7 +9,7 @@
 //!
 //! v0.1 stub: API surface only. Real verdict-emission + tier-gate enforcement lands in Phase-3.
 
-use crate::syscall::{HookwallVerdict, AccessTier, SyscallErr};
+use crate::syscall::{AccessTier, HookwallVerdict, SyscallErr};
 
 /// Reserved hookwall slot count per federation cross-vantage agreement.
 /// Slots 0-15 map 1:1 to canonical 16 syscalls; slots 16-63 reserved for Phase-3 expansion (tier-2 cosign required).
@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn slot_out_of_range_returns_invalid() {
         let ctx = HookContext {
-            slot: 64,  // out of range (0-63)
+            slot: 64, // out of range (0-63)
             syscall_no: 1,
             caller_pid: 0,
             tier: HookTier::Micro,

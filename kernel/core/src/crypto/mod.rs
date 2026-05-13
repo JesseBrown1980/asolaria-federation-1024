@@ -87,7 +87,11 @@ pub fn sign(_canonical_bytes: &[u8], _priv: &PrivateKey) -> Result<Signature, Cr
 
 /// Verify a signature against canonical envelope bytes + public key.
 /// v0.1 stub.
-pub fn verify(_canonical_bytes: &[u8], _sig: &Signature, _pub_key: &PublicKey) -> Result<(), CryptoErr> {
+pub fn verify(
+    _canonical_bytes: &[u8],
+    _sig: &Signature,
+    _pub_key: &PublicKey,
+) -> Result<(), CryptoErr> {
     Err(CryptoErr::Unimplemented)
 }
 
@@ -117,8 +121,10 @@ mod tests {
 
     #[test]
     fn canonical_bytes_deterministic() {
-        let a = canonical_envelope_bytes(1, 2, b"TEST_TYPE", b"EVT-TEST", b"id-0", 123, b"payload").unwrap();
-        let b = canonical_envelope_bytes(1, 2, b"TEST_TYPE", b"EVT-TEST", b"id-0", 123, b"payload").unwrap();
+        let a = canonical_envelope_bytes(1, 2, b"TEST_TYPE", b"EVT-TEST", b"id-0", 123, b"payload")
+            .unwrap();
+        let b = canonical_envelope_bytes(1, 2, b"TEST_TYPE", b"EVT-TEST", b"id-0", 123, b"payload")
+            .unwrap();
         assert_eq!(a, b);
         assert!(a.len() > 10);
     }

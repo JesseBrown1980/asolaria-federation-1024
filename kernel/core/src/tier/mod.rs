@@ -207,7 +207,15 @@ mod tests {
         // operator-physical touch per AccessTier::Sovereignty doc (the quintuple
         // window does NOT bypass the physical-only rule, but the function returns
         // true for window-membership query purposes).
-        for &t in &[AccessTier::Public, AccessTier::Restricted, AccessTier::Stealth, AccessTier::Hidden, AccessTier::Shadow, AccessTier::Secret, AccessTier::Sovereignty] {
+        for &t in &[
+            AccessTier::Public,
+            AccessTier::Restricted,
+            AccessTier::Stealth,
+            AccessTier::Hidden,
+            AccessTier::Shadow,
+            AccessTier::Secret,
+            AccessTier::Sovereignty,
+        ] {
             assert!(quintuple_auth_covers(t));
         }
     }

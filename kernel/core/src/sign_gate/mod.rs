@@ -10,8 +10,8 @@
 //!   hookwall (uniform entry) + PID (uniform addressing) + GNN pipes (uniform flow).
 //! Sign-gate is the security check on the uniform entry: ed25519-verify then deny/allow filter.
 
+use crate::crypto::{verify, CryptoErr, PublicKey, Signature};
 use alloc::string::String;
-use crate::crypto::{verify, Signature, PublicKey, CryptoErr};
 
 /// Default denies — case-sensitive substring tags scanned across `envelope.hookwall_events[].tag`.
 pub const DEFAULT_DENIES: &[&str] = &[
@@ -93,13 +93,19 @@ pub fn deny_check(hookwall_event_tags: &[&str], denies: &[&str]) -> bool {
 /// v0.1 simplified rule: name is all-uppercase A-Z/0-9/_ AND starts with letter AND contains "VIRUS".
 pub fn task_39_envvar_virus_allow(envvar_name: &str) -> bool {
     let bytes = envvar_name.as_bytes();
-    if bytes.is_empty() { return false; }
+    if bytes.is_empty() {
+        return false;
+    }
     // First char must be A-Z.
-    if !(bytes[0] >= b'A' && bytes[0] <= b'Z') { return false; }
+    if !(bytes[0] >= b'A' && bytes[0] <= b'Z') {
+        return false;
+    }
     // All chars must be A-Z, 0-9, or _.
     for &b in bytes {
         let ok = (b >= b'A' && b <= b'Z') || (b >= b'0' && b <= b'9') || b == b'_';
-        if !ok { return false; }
+        if !ok {
+            return false;
+        }
     }
     // Must contain VIRUS as substring.
     envvar_name.contains("VIRUS")
@@ -181,7 +187,14 @@ mod tests {
         let sig = Signature([0u8; 64]);
         let pk = PublicKey([0u8; 32]);
         // crypto::verify stub returns Unimplemented → SignGateErr::SigMissing → sig_valid=false
-        let v = gate_envelope(b"canonical-bytes", &sig, &pk, "ed25519", &["safe"], &["BAR"]);
+        let v = gate_envelope(
+            b"canonical-bytes",
+            &sig,
+            &pk,
+            "ed25519",
+            &["safe"],
+            &["BAR"],
+        );
         assert!(!v.sig_valid);
         assert!(!v.admitted);
     }

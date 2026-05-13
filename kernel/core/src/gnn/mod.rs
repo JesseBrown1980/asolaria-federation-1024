@@ -6,8 +6,8 @@
 //! v0.1 scaffold: API + ONNX-loaded-model placeholder + deterministic fallback.
 //! Phase-4 wave wires real `ggml` no_std inference + edge accounting (2.16M edges from canon).
 
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 /// Target edge count per `project_gnn_edges_canon_correction_2_16M_not_94K.md`.
 pub const GNN_EDGES_TARGET: u32 = 2_158_671;
@@ -112,7 +112,11 @@ impl GnnInference {
     }
 
     /// Loads an ONNX model. v0.1 stub.
-    pub fn load_onnx_model(&mut self, _model_bytes: &[u8], _expected_sha16: &str) -> Result<(), GnnErr> {
+    pub fn load_onnx_model(
+        &mut self,
+        _model_bytes: &[u8],
+        _expected_sha16: &str,
+    ) -> Result<(), GnnErr> {
         Err(GnnErr::Unimplemented)
     }
 
@@ -133,7 +137,11 @@ impl GnnInference {
     }
 
     /// Verdict aggregation. v0.1 returns Hold (conservative default).
-    pub fn aggregate_verdict(&self, _votes_in_favor: u32, _total_votes: u32) -> Result<AggregatedVerdict, GnnErr> {
+    pub fn aggregate_verdict(
+        &self,
+        _votes_in_favor: u32,
+        _total_votes: u32,
+    ) -> Result<AggregatedVerdict, GnnErr> {
         if !self.model_loaded {
             return Ok(AggregatedVerdict::Hold);
         }
@@ -144,8 +152,8 @@ impl GnnInference {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::vec;
     use alloc::string::String;
+    use alloc::vec;
 
     #[test]
     fn gnn_edges_target_is_2_16M() {
@@ -177,7 +185,10 @@ mod tests {
     #[test]
     fn fallback_verdict_is_hold() {
         let g = GnnInference::new();
-        assert_eq!(g.aggregate_verdict(50, 100).unwrap(), AggregatedVerdict::Hold);
+        assert_eq!(
+            g.aggregate_verdict(50, 100).unwrap(),
+            AggregatedVerdict::Hold
+        );
     }
 
     #[test]

@@ -96,15 +96,11 @@ pub fn test_alphabet_v0_1() -> [&'static str; BEHCS256_ALPHABET_SIZE] {
     let mut arr: [&'static str; 256] = [PLACEHOLDER; 256];
     // Map index 0..95 to ASCII 32..126 (printable).
     const ASCII_TABLE: &[&str; 95] = &[
-        " ", "!", "\"", "#", "$", "%", "&", "'", "(", ")",
-        "*", "+", ",", "-", ".", "/", "0", "1", "2", "3",
-        "4", "5", "6", "7", "8", "9", ":", ";", "<", "=",
-        ">", "?", "@", "A", "B", "C", "D", "E", "F", "G",
-        "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q",
-        "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "[",
-        "\\", "]", "^", "_", "`", "a", "b", "c", "d", "e",
-        "f", "g", "h", "i", "j", "k", "l", "m", "n", "o",
-        "p", "q", "r", "s", "t", "u", "v", "w", "x", "y",
+        " ", "!", "\"", "#", "$", "%", "&", "'", "(", ")", "*", "+", ",", "-", ".", "/", "0", "1",
+        "2", "3", "4", "5", "6", "7", "8", "9", ":", ";", "<", "=", ">", "?", "@", "A", "B", "C",
+        "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U",
+        "V", "W", "X", "Y", "Z", "[", "\\", "]", "^", "_", "`", "a", "b", "c", "d", "e", "f", "g",
+        "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y",
         "z", "{", "|", "}", "~",
     ];
     let mut i = 0;
@@ -152,7 +148,10 @@ mod tests {
     #[test]
     fn sentence_returns_one_word_per_field() {
         let alpha = test_alphabet_v0_1();
-        let s = sentence(&[("D1", "liris"), ("D2", "heartbeat"), ("D7", "alive")], &alpha);
+        let s = sentence(
+            &[("D1", "liris"), ("D2", "heartbeat"), ("D7", "alive")],
+            &alpha,
+        );
         assert_eq!(s.len(), 3);
         assert_eq!(s[0].dim, "D1");
         assert_eq!(s[0].tuple, "D1:liris");

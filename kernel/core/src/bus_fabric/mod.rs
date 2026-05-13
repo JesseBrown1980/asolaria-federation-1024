@@ -59,7 +59,9 @@ impl PortLabel {
                 return Err(BusFabricErr::GlyphOutOfRange);
             }
         }
-        Ok(Self { levels: levels.to_vec() })
+        Ok(Self {
+            levels: levels.to_vec(),
+        })
     }
 
     /// Returns the depth (number of levels).
@@ -117,12 +119,18 @@ mod tests {
     #[test]
     fn port_label_too_deep_rejected() {
         let levels: Vec<u16> = (0..21).map(|i| i as u16).collect();
-        assert_eq!(PortLabel::from_levels(&levels), Err(BusFabricErr::LabelTooDeep));
+        assert_eq!(
+            PortLabel::from_levels(&levels),
+            Err(BusFabricErr::LabelTooDeep)
+        );
     }
 
     #[test]
     fn port_label_glyph_out_of_range() {
-        assert_eq!(PortLabel::from_levels(&[1024]), Err(BusFabricErr::GlyphOutOfRange));
+        assert_eq!(
+            PortLabel::from_levels(&[1024]),
+            Err(BusFabricErr::GlyphOutOfRange)
+        );
     }
 
     #[test]

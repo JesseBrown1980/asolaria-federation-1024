@@ -137,22 +137,35 @@ impl Default for AgentRegistry {
 impl AgentRegistry {
     /// New empty registry.
     pub fn new() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 
     /// Count live agents.
     pub fn count(&self) -> usize {
-        self.entries.iter().filter(|e| e.state != AgentState::Retired).count()
+        self.entries
+            .iter()
+            .filter(|e| e.state != AgentState::Retired)
+            .count()
     }
 
     /// Count agents in a given vantage.
     pub fn count_in_vantage(&self, v: VantageId) -> usize {
-        self.entries.iter().filter(|e| e.vantage == v && e.state != AgentState::Retired).count()
+        self.entries
+            .iter()
+            .filter(|e| e.vantage == v && e.state != AgentState::Retired)
+            .count()
     }
 
     /// Spawn primitive — v0.1 stub.
     /// Real impl mints BEHCS-1024 PID, appends to registry, emits AGENT_SPAWNED envelope.
-    pub fn spawn(&mut self, _role: AgentRole, _vantage: VantageId, _tier: AccessTier) -> Result<String, AgentErr> {
+    pub fn spawn(
+        &mut self,
+        _role: AgentRole,
+        _vantage: VantageId,
+        _tier: AccessTier,
+    ) -> Result<String, AgentErr> {
         if self.count() >= AGENT_REGISTRY_MAX {
             return Err(AgentErr::RegistryFull);
         }

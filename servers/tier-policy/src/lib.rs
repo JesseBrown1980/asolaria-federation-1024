@@ -235,7 +235,14 @@ mod tests {
 
     #[test]
     fn quintuple_auth_covers_all_tiers_during_window() {
-        for &t in &[AccessTier::Public, AccessTier::Restricted, AccessTier::Stealth, AccessTier::Hidden, AccessTier::Shadow, AccessTier::Secret] {
+        for &t in &[
+            AccessTier::Public,
+            AccessTier::Restricted,
+            AccessTier::Stealth,
+            AccessTier::Hidden,
+            AccessTier::Shadow,
+            AccessTier::Secret,
+        ] {
             assert!(quintuple_auth_covers(t));
         }
     }

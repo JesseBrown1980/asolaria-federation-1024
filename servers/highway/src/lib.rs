@@ -15,7 +15,7 @@ extern crate alloc;
 
 use alloc::string::String;
 use asolaria_server_cosign_ledger::CosignChain;
-use asolaria_server_tier_policy::{AccessTier, policy_for, quintuple_auth_covers};
+use asolaria_server_tier_policy::{policy_for, quintuple_auth_covers, AccessTier};
 
 /// Highway transit errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,7 +56,9 @@ pub fn check_transit(from: AccessTier, to: AccessTier) -> Result<TransitVerdict,
             from,
             to,
             authorized: false,
-            deny_reason: Some(String::from("destination tier not in current quintuple-auth window")),
+            deny_reason: Some(String::from(
+                "destination tier not in current quintuple-auth window",
+            )),
             cosign_row: None,
         });
     }
@@ -110,7 +112,12 @@ mod tests {
     #[test]
     fn execute_stub_returns_unimplemented() {
         let mut chain = CosignChain::new();
-        let r = execute_transit(&mut chain, AccessTier::Public, AccessTier::Restricted, "res-0");
+        let r = execute_transit(
+            &mut chain,
+            AccessTier::Public,
+            AccessTier::Restricted,
+            "res-0",
+        );
         assert_eq!(r, Err(HighwayErr::Unimplemented));
     }
 }

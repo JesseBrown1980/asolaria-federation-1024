@@ -16,8 +16,8 @@
 
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use crate::syscall::AccessTier;
 use crate::highway::{check_transit, HighwayErr};
+use crate::syscall::AccessTier;
 
 /// Maximum envelope payload accepted by a single transit (64 KiB).
 pub const MAX_TRANSIT_ENVELOPE_BYTES: usize = 64 * 1024;

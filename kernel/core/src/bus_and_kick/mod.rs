@@ -14,8 +14,8 @@
 //!   - `kickPeer(peer, text)` — physical wake-kick via supervised type, **sparingly**
 //!   - `postAndKick(peer, env, kickText)` — combo for action-required cross-peer
 
-use alloc::string::{String, ToString};
 use alloc::format;
+use alloc::string::{String, ToString};
 
 /// Canonical Hilbert-room number for bus-and-kick supervisor (per liris source line 1).
 pub const BUS_AND_KICK_HILBERT_ROOM: u32 = 29;
@@ -41,8 +41,11 @@ pub fn classify_verb(verb: &str) -> ActionClass {
     let v = verb.to_uppercase();
     if v.contains("HEARTBEAT") || v.contains("PULSE_LOOP") || v.contains("STEADY") {
         ActionClass::Heartbeat
-    } else if v.contains("ACTIONABLE") || v.contains("DIRECTIVE") || v.contains("WAKE")
-        || v.contains("ALERT") || v.contains("KICK_REQUIRED")
+    } else if v.contains("ACTIONABLE")
+        || v.contains("DIRECTIVE")
+        || v.contains("WAKE")
+        || v.contains("ALERT")
+        || v.contains("KICK_REQUIRED")
     {
         ActionClass::PostAndKick
     } else {
@@ -125,19 +128,31 @@ mod tests {
     #[test]
     fn classify_heartbeat_is_bus_only() {
         assert_eq!(classify_verb("EVT-ACER-HEARTBEAT"), ActionClass::Heartbeat);
-        assert_eq!(classify_verb("LIRIS_HEARTBEAT_STEADY"), ActionClass::Heartbeat);
+        assert_eq!(
+            classify_verb("LIRIS_HEARTBEAT_STEADY"),
+            ActionClass::Heartbeat
+        );
     }
 
     #[test]
     fn classify_directive_is_post_and_kick() {
-        assert_eq!(classify_verb("EVT-LIRIS-DIRECTIVE-RESPAWN"), ActionClass::PostAndKick);
+        assert_eq!(
+            classify_verb("EVT-LIRIS-DIRECTIVE-RESPAWN"),
+            ActionClass::PostAndKick
+        );
         assert_eq!(classify_verb("WAKE_LIRIS_NOW"), ActionClass::PostAndKick);
     }
 
     #[test]
     fn classify_misc_is_bus_only() {
-        assert_eq!(classify_verb("EVT-ACER-PHASE-2-CARGO-SCAFFOLD-LANDED"), ActionClass::BusOnly);
-        assert_eq!(classify_verb("ACER_COSIGN_LIRIS_BUS_BIAS_RECEIPTS"), ActionClass::BusOnly);
+        assert_eq!(
+            classify_verb("EVT-ACER-PHASE-2-CARGO-SCAFFOLD-LANDED"),
+            ActionClass::BusOnly
+        );
+        assert_eq!(
+            classify_verb("ACER_COSIGN_LIRIS_BUS_BIAS_RECEIPTS"),
+            ActionClass::BusOnly
+        );
     }
 
     #[test]

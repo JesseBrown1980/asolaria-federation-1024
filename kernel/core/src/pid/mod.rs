@@ -80,7 +80,10 @@ pub fn is_valid_role(r: &str) -> bool {
 
 /// Returns true if `c` is one of the 4 region chars.
 pub fn is_valid_region(c: u8) -> bool {
-    matches!(c, namespace::GRAND | namespace::HOST | namespace::FEDERATION | namespace::DATA)
+    matches!(
+        c,
+        namespace::GRAND | namespace::HOST | namespace::FEDERATION | namespace::DATA
+    )
 }
 
 /// Returns true if `s` is exactly 4 hex digits.
@@ -204,7 +207,10 @@ pub fn parse_pid(pid: &str) -> Result<ParsedPid, PidErr> {
     let role = &pid[..idx];
     let tail = &pid[idx + 5..]; // skip "-PID-"
 
-    if tail.len() == 10 && tail.as_bytes().get(4) == Some(&b'-') && tail.as_bytes().get(7) == Some(&b'-') {
+    if tail.len() == 10
+        && tail.as_bytes().get(4) == Some(&b'-')
+        && tail.as_bytes().get(7) == Some(&b'-')
+    {
         let date_ok = tail[..4].bytes().all(|b| b.is_ascii_digit())
             && tail[5..7].bytes().all(|b| b.is_ascii_digit())
             && tail[8..10].bytes().all(|b| b.is_ascii_digit());
@@ -254,7 +260,10 @@ pub fn parse_pid(pid: &str) -> Result<ParsedPid, PidErr> {
         if !nonce_block.starts_with('N') || !is_valid_hex_n(&nonce_block[1..], 5) {
             return Err(PidErr::InvalidNonce);
         }
-        (Some(process_block[1..].into()), Some(nonce_block[1..].into()))
+        (
+            Some(process_block[1..].into()),
+            Some(nonce_block[1..].into()),
+        )
     } else {
         (None, None)
     };
@@ -287,11 +296,25 @@ pub fn validate_pid(pid: &str, strict_role: bool) -> Result<(), PidErr> {
 
 /// Mints a canonical PID (short form). For extended form with -P-N suffix
 /// use [`mint_pid_extended`].
-pub fn mint_pid(role: &str, region: u8, host_code: &str, activity: &str, wave: &str) -> Result<String, PidErr> {
-    if !is_valid_region(region) { return Err(PidErr::InvalidRegion); }
-    if !is_valid_host_code(host_code) { return Err(PidErr::InvalidHostCode); }
-    if !is_valid_hex_n(activity, 2) { return Err(PidErr::InvalidActivity); }
-    if !is_valid_hex_n(wave, 3) { return Err(PidErr::InvalidWave); }
+pub fn mint_pid(
+    role: &str,
+    region: u8,
+    host_code: &str,
+    activity: &str,
+    wave: &str,
+) -> Result<String, PidErr> {
+    if !is_valid_region(region) {
+        return Err(PidErr::InvalidRegion);
+    }
+    if !is_valid_host_code(host_code) {
+        return Err(PidErr::InvalidHostCode);
+    }
+    if !is_valid_hex_n(activity, 2) {
+        return Err(PidErr::InvalidActivity);
+    }
+    if !is_valid_hex_n(wave, 3) {
+        return Err(PidErr::InvalidWave);
+    }
     let mut s = String::new();
     s.push_str(role);
     s.push_str("-PID-");
@@ -316,8 +339,12 @@ pub fn mint_pid_extended(
     nonce: &str,
 ) -> Result<String, PidErr> {
     let mut s = mint_pid(role, region, host_code, activity, wave)?;
-    if !is_valid_hex_n(process_tag, 2) { return Err(PidErr::InvalidProcess); }
-    if !is_valid_hex_n(nonce, 5) { return Err(PidErr::InvalidNonce); }
+    if !is_valid_hex_n(process_tag, 2) {
+        return Err(PidErr::InvalidProcess);
+    }
+    if !is_valid_hex_n(nonce, 5) {
+        return Err(PidErr::InvalidNonce);
+    }
     s.push_str("-P");
     s.push_str(process_tag);
     s.push_str("-N");
@@ -385,7 +412,9 @@ mod tests {
 
     #[test]
     fn region_validation() {
-        for c in [b'G', b'H', b'F', b'D'] { assert!(is_valid_region(c)); }
+        for c in [b'G', b'H', b'F', b'D'] {
+            assert!(is_valid_region(c));
+        }
         assert!(!is_valid_region(b'X'));
     }
 
@@ -415,7 +444,14 @@ mod tests {
                 assert_eq!(parts.host_code, "740C");
                 assert_eq!(parts.activity, "07");
                 assert_eq!(parts.wave, "104");
-                let minted = mint_pid(&parts.role, parts.region, &parts.host_code, &parts.activity, &parts.wave).unwrap();
+                let minted = mint_pid(
+                    &parts.role,
+                    parts.region,
+                    &parts.host_code,
+                    &parts.activity,
+                    &parts.wave,
+                )
+                .unwrap();
                 assert_eq!(minted, p);
             }
             _ => panic!("expected Canonical"),
@@ -439,7 +475,10 @@ mod tests {
 
     #[test]
     fn invalid_region_rejected() {
-        assert_eq!(parse_pid("ACER-PID-X740C-A07-W104"), Err(PidErr::InvalidRegion));
+        assert_eq!(
+            parse_pid("ACER-PID-X740C-A07-W104"),
+            Err(PidErr::InvalidRegion)
+        );
     }
 
     #[test]
@@ -452,9 +491,18 @@ mod tests {
     #[test]
     fn short_form_classifies_as_regular_per_aether_v3() {
         // Cycle-47 update: short form → Regular (not Pending) per aether v3 canonical naming.
-        assert_eq!(classify_subclass("ACER-PID-H740C-A07-W104"), PidSubclass::Regular);
-        assert_eq!(classify_subclass("OP-RAYSSA-PID-G0000-A00-W000"), PidSubclass::Regular);
-        assert!(is_in_subclass("ACER-PID-H740C-A07-W104", PidSubclass::Regular));
+        assert_eq!(
+            classify_subclass("ACER-PID-H740C-A07-W104"),
+            PidSubclass::Regular
+        );
+        assert_eq!(
+            classify_subclass("OP-RAYSSA-PID-G0000-A00-W000"),
+            PidSubclass::Regular
+        );
+        assert!(is_in_subclass(
+            "ACER-PID-H740C-A07-W104",
+            PidSubclass::Regular
+        ));
     }
 
     #[test]
@@ -499,9 +547,18 @@ mod tests {
 
     #[test]
     fn is_in_subclass_true_for_extended_form_regular_extended() {
-        assert!(is_in_subclass("ACER-PID-H740C-A07-W104-P00-N00000", PidSubclass::RegularExtended));
-        assert!(!is_in_subclass("ACER-PID-H740C-A07-W104-P00-N00000", PidSubclass::Regular));
-        assert!(!is_in_subclass("ACER-PID-H740C-A07-W104-P00-N00000", PidSubclass::HookwallCp));
+        assert!(is_in_subclass(
+            "ACER-PID-H740C-A07-W104-P00-N00000",
+            PidSubclass::RegularExtended
+        ));
+        assert!(!is_in_subclass(
+            "ACER-PID-H740C-A07-W104-P00-N00000",
+            PidSubclass::Regular
+        ));
+        assert!(!is_in_subclass(
+            "ACER-PID-H740C-A07-W104-P00-N00000",
+            PidSubclass::HookwallCp
+        ));
     }
 
     #[test]
@@ -568,10 +625,16 @@ mod tests {
                 assert_eq!(parts.wave, "104");
                 assert_eq!(parts.process_tag.as_deref(), Some("00"));
                 assert_eq!(parts.nonce.as_deref(), Some("00000"));
-                let minted = mint_pid_extended(&parts.role, parts.region, &parts.host_code,
-                    &parts.activity, &parts.wave,
+                let minted = mint_pid_extended(
+                    &parts.role,
+                    parts.region,
+                    &parts.host_code,
+                    &parts.activity,
+                    &parts.wave,
                     parts.process_tag.as_deref().unwrap(),
-                    parts.nonce.as_deref().unwrap()).unwrap();
+                    parts.nonce.as_deref().unwrap(),
+                )
+                .unwrap();
                 assert_eq!(minted, p);
             }
             _ => panic!("expected Canonical"),
@@ -594,7 +657,10 @@ mod tests {
     #[test]
     fn extended_form_rejects_invalid_process_tag() {
         // P-block must be P<2hex>; "PZZ" fails.
-        assert_eq!(parse_pid("ACER-PID-H740C-A07-W104-PZZ-N00000"), Err(PidErr::InvalidProcess));
+        assert_eq!(
+            parse_pid("ACER-PID-H740C-A07-W104-PZZ-N00000"),
+            Err(PidErr::InvalidProcess)
+        );
     }
 
     #[test]
@@ -602,12 +668,18 @@ mod tests {
         // N-block must be N<5hex>; only 4 hex digits fails specific shape check
         // → InvalidNonce (more specific than MalformedFormat — parser reaches the N
         // validation since 5-part split succeeds).
-        assert_eq!(parse_pid("ACER-PID-H740C-A07-W104-P00-N0000"), Err(PidErr::InvalidNonce));
+        assert_eq!(
+            parse_pid("ACER-PID-H740C-A07-W104-P00-N0000"),
+            Err(PidErr::InvalidNonce)
+        );
     }
 
     #[test]
     fn four_parts_still_malformed() {
         // 4 parts (no nonce) is rejected — extended form requires both P and N.
-        assert_eq!(parse_pid("ACER-PID-H740C-A07-W104-P00"), Err(PidErr::MalformedFormat));
+        assert_eq!(
+            parse_pid("ACER-PID-H740C-A07-W104-P00"),
+            Err(PidErr::MalformedFormat)
+        );
     }
 }

@@ -40,7 +40,12 @@ unsafe impl GlobalAlloc for BumpAllocator {
             if new_next > heap_end {
                 return core::ptr::null_mut();
             }
-            match self.next.compare_exchange_weak(current, new_next, Ordering::Relaxed, Ordering::Relaxed) {
+            match self.next.compare_exchange_weak(
+                current,
+                new_next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
                 Ok(_) => return aligned as *mut u8,
                 Err(actual) => current = actual,
             }
@@ -58,7 +63,11 @@ static mut HEAP: [u8; HEAP_SIZE] = [0u8; HEAP_SIZE];
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    loop { unsafe { core::arch::asm!("hlt", options(nomem, nostack)); } }
+    loop {
+        unsafe {
+            core::arch::asm!("hlt", options(nomem, nostack));
+        }
+    }
 }
 
 #[no_mangle]

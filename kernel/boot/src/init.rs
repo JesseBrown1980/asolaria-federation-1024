@@ -24,8 +24,8 @@
 //!   other  → respond with "UNKN" + echo bytes[0..4]
 
 use asolaria_kernel_core::syscall::{
-    sys_cosign_append, sys_envelope_recv, sys_envelope_send, sys_exec, sys_exit,
-    sys_hookwall_post, sys_hookwall_pre, sys_pid_current, HookwallVerdict, SyscallErr,
+    sys_cosign_append, sys_envelope_recv, sys_envelope_send, sys_exec, sys_exit, sys_hookwall_post,
+    sys_hookwall_pre, sys_pid_current, HookwallVerdict, SyscallErr,
 };
 use asolaria_kernel_core::{FEDERATION_ANCHOR_PID, KERNEL_VERSION};
 

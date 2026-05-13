@@ -7,8 +7,8 @@
 //! Per Vanguard scout #2 verdict: port state machines + SLO gate to Rust.
 //! Defer main-loop wiring (`index.mjs`) to v0.2 pending deterministic test harness.
 
-use alloc::string::String;
 use alloc::collections::VecDeque;
+use alloc::string::String;
 
 // ============================================================================
 // PEER STATE MACHINE (UPGRADE-1)
@@ -79,7 +79,12 @@ impl PeerStateMachine {
     }
 
     /// Attempt a transition. Returns Err if illegal.
-    pub fn transition(&mut self, next: PeerState, reason: &str, now_ns: u64) -> Result<(), &'static str> {
+    pub fn transition(
+        &mut self,
+        next: PeerState,
+        reason: &str,
+        now_ns: u64,
+    ) -> Result<(), &'static str> {
         let legal = legal_transitions(self.state);
         if !legal.contains(&next) {
             return Err("illegal_transition");
@@ -99,7 +104,12 @@ impl PeerStateMachine {
         Ok(())
     }
 
-    pub fn on_kick(&mut self, _kick_text: &str, deadline_ns_from_now: u64, now_ns: u64) -> Result<(), &'static str> {
+    pub fn on_kick(
+        &mut self,
+        _kick_text: &str,
+        deadline_ns_from_now: u64,
+        now_ns: u64,
+    ) -> Result<(), &'static str> {
         self.kick_deadline_ns = Some(now_ns + deadline_ns_from_now);
         self.transition(PeerState::Kicked, "kick-issued", now_ns)
     }
@@ -251,10 +261,10 @@ mod tests {
 
     #[test]
     fn op_halt_does_not_match_loose_strings() {
-        assert!(!is_op_halt_verb("HALT-EMIT"));  // missing EVT- prefix
-        assert!(!is_op_halt_verb("EVT-X-HALT"));  // missing -EMIT suffix
-        assert!(!is_op_halt_verb("EVT-SOMETHING-HALT-OTHER"));  // wrong tail
-        assert!(!is_op_halt_verb("ACER_OWNER_REFRESH_VERIFICATION"));  // unrelated
+        assert!(!is_op_halt_verb("HALT-EMIT")); // missing EVT- prefix
+        assert!(!is_op_halt_verb("EVT-X-HALT")); // missing -EMIT suffix
+        assert!(!is_op_halt_verb("EVT-SOMETHING-HALT-OTHER")); // wrong tail
+        assert!(!is_op_halt_verb("ACER_OWNER_REFRESH_VERIFICATION")); // unrelated
     }
 
     #[test]
