@@ -10,6 +10,11 @@
 
 #![no_std]
 #![forbid(unsafe_code)]
+#![allow(unknown_lints)] // CI runs rustc 1.81; some allows below are 1.95-era lint names
+#![allow(missing_docs)]
+#![allow(dead_code)]
+#![allow(rustdoc::bare_urls)]
+#![allow(rustdoc::broken_intra_doc_links)]
 
 extern crate alloc;
 

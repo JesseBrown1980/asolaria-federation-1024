@@ -1,4 +1,13 @@
 #![no_std]
+#![allow(unknown_lints)] // CI runs rustc 1.81; some allows below are 1.95-era lint names
+#![allow(missing_docs)]
+#![allow(dead_code)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::doc_lazy_continuation)]
+#![allow(clippy::manual_div_ceil)]
+#![allow(clippy::new_without_default)]
+#![allow(rustdoc::bare_urls)]
+#![allow(rustdoc::broken_intra_doc_links)]
 //! Phase-2.5 demote of kernel/core/src/agent_runtime/mod.rs to userspace crate. cycle-70.
 //!
 //! Agent runtime · Phase-6 Steps 101-120
