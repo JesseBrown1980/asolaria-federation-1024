@@ -1,0 +1,15 @@
+[package]
+name = "asolaria-kernel-boot"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Asolaria Federation Remake · x86_64 bare-metal boot stub · Phase-2 Step 23"
+
+[[bin]]
+name = "asolaria-os"
+path = "src/main.rs"
+
+[dependencies]
+asolaria-kernel-core = { path = "../core" }

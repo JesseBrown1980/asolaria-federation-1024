@@ -1,0 +1,48 @@
+//! Asolaria Federation Remake · Kernel Core
+//!
+//! Anchor PID: ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11
+//! Phase 2 CLOSED at envelope :82496 (KERNEL_TIER_LANDED) · Phase 3 scaffolding now in progress
+//!
+//! Modules:
+//! - `pid` — BEHCS-1024 PID minter (Phase-2 Step 27, port of `mintBehcs256Pid47` to `mint_behcs1024_pid_60`)
+//! - `envelope` — atomic envelope dispatch primitive (Phase-2 Step 29, lock-free MPMC)
+//! - `crypto` — ed25519 substrate (Phase-2 Step 28)
+//! - `hookwall` — pre/post syscall hooks (Phase-2 prep + Phase-3 wiring)
+//! - `syscall` — 16-syscall canonical surface (Phase-2 Step 25)
+//! - `cosign_chain` — append-only sha-linked verdict ledger (Phase-3 Step 45)
+
+#![no_std]
+#![forbid(unsafe_code)]  // syscall + envelope dispatch + PID minter must be unsafe-free at API layer
+#![warn(missing_docs)]
+
+extern crate alloc;
+
+pub mod pid;
+pub mod envelope;
+pub mod crypto;
+pub mod hookwall;
+pub mod syscall;
+pub mod frame_alloc;
+// Phase-2.5 cycle-72: demote was premature — kernel modules must remain present-and-callable
+// until Syscall-IPC-Rewire converts each call site to envelope RPC. Servers/* mirrors at
+// servers/{cosign-ledger,tier-policy,highway,agent-runtime,gnn-oracle}/src/lib.rs are the
+// forward targets; rewire moves call sites one-by-one without breaking the kernel build.
+pub mod cosign_chain;
+pub mod tier;
+pub mod highway;
+pub mod agent_runtime;
+pub mod gnn;
+pub mod bus_fabric;
+pub mod glyph_genesis;
+pub mod bus_and_kick;
+pub mod sign_gate;
+pub mod cycle_orch;
+pub mod atlas;
+pub mod transit;
+pub mod tier_gate;
+
+/// Kernel version string. Bumped on tier-2 cosign-approved ABI changes.
+pub const KERNEL_VERSION: &str = "0.2.0-phase3-scaffold";
+
+/// Federation anchor PID for any kernel-emitted envelope.
+pub const FEDERATION_ANCHOR_PID: &str = "ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11";

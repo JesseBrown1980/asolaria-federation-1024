@@ -1,0 +1,43 @@
+# Asolaria Federation Remake · Kernel Workspace
+# Anchor PID: ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11
+# Phase 2 · Step 22 (Rust no_std edition 2021) · See KERNEL_TARGETS.md
+
+[workspace]
+resolver = "2"
+members = [
+    "boot",
+    "core",
+]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+authors = ["Asolaria Federation"]
+repository = "https://github.com/<TBD per Phase-1 step 3>/asolaria-federation-1024"
+
+[workspace.dependencies]
+# Crypto substrate · Phase-2 Step 28
+ed25519-dalek = { version = "2.1", default-features = false, features = ["zeroize"] }
+zeroize = { version = "1.7", default-features = false, features = ["derive"] }
+
+# Boot loader · Phase-2 Step 23
+bootloader = { version = "0.11", default-features = false }
+
+# Lock-free MPMC ring buffer · Phase-2 Step 29
+crossbeam-queue = { version = "0.3", default-features = false, features = ["alloc"] }
+
+# Hash · for PID minter byte-parity with JS reference · Phase-2 Step 27
+sha2 = { version = "0.10", default-features = false }
+
+[profile.release]
+opt-level = "z"      # size over speed for kernel hot-path
+lto = true
+codegen-units = 1
+panic = "abort"      # no unwinding in kernel
+strip = "symbols"
+
+[profile.dev]
+opt-level = 0
+debug = true
+panic = "abort"

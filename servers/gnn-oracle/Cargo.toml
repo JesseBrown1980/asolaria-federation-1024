@@ -1,0 +1,15 @@
+[package]
+name = "asolaria-server-gnn-oracle"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+authors = ["Asolaria Federation"]
+description = "Asolaria userspace server · GNN inference oracle · Phase-2.5 demote target for kernel/core/src/gnn/"
+
+[lib]
+crate-type = ["rlib"]
+
+# Phase-2.5 placeholder dependencies — mirror what kernel/core/src/gnn/mod.rs imports.
+# Source uses `alloc::{string, vec}` only today; Phase-4 wave brings ggml/onnx no_std inference.
+[dependencies]

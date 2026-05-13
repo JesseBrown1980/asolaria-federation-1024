@@ -1,0 +1,51 @@
+name: Bug report
+description: A canon behavior is broken
+title: "[bug] "
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Anchor PID:** `ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11`
+        Bug reports MUST include reproduction + observed vs expected. Vague reports will be closed.
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction (exact commands, copy-paste verbatim)
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior (cite canon — REPO_LAW row, plan step, or cosign-chain row)
+    validations:
+      required: true
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Tier severity
+      options:
+        - T1 micro (advisory)
+        - T2 cosign (blocks normal ops)
+        - T3 firmware (blocks substrate)
+        - T4 sovereignty (operator-only)
+    validations:
+      required: true
+  - type: dropdown
+    id: vantage
+    attributes:
+      label: Vantage where observed
+      options: [acer, liris, falcon, aether, multi]
+    validations:
+      required: true
+  - type: textarea
+    id: cosign_ref
+    attributes:
+      label: Cosign-chain row (if related to a known canon event)
+      placeholder: "row 157 / N/A"

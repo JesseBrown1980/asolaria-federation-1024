@@ -1,0 +1,84 @@
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.npm
+.eslintcache
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+.python-version
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Editor / IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+dist/
+build/
+out/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test + coverage
+coverage/
+.nyc_output/
+*.lcov
+.pytest_cache/
+
+# Logs + tmp
+*.log
+tmp/
+.tmp/
+*.pid
+*.lock
+!Cargo.lock
+
+# Federation-specific
+broadcasts/*/  # acer-emit/, liris-emit/, falcon-emit/, aether-emit/ — runtime envelopes (not source)
+!broadcasts/.gitkeep
+*.behcs-shadow
+*.stealth
+.fired-dispatches.jsonl
+
+# Sensitive
+*.pem
+*.key
+!*.pub.pem
+!**/test-fixtures/**/*.pem
+.env
+.env.*
+!.env.example
+credentials.json
+secrets/
+
+# Kernel scratch
+kernel/target/
+kernel/**/*.img
+kernel/**/*.efi
+qemu-disk.img

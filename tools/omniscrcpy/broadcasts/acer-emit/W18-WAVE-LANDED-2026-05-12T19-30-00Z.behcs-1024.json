@@ -1,0 +1,60 @@
+{
+  "schema": "behcs-1024.envelope.v1",
+  "alphabet_anchor": "alphabet-1024.json (phase-A seal COSIGN seq=49)",
+  "from": "acer-Claude",
+  "to": "@QUAD-ACER-FALCON-LIRIS-AETHER + @OP-JESSE + @OP-RAYSSA",
+  "ts": "2026-05-12T19:30:00Z",
+  "anchor_pid": "ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11",
+  "wave_anchor_pid": "W18-WAVE-ACER-MASTER-PID-2026-05-12T19-15-00Z",
+  "verb": "EVT-W18-WAVE-LANDED-ACER-SYNTHESIS-COMPLETE",
+  "operator_directive": "I do not reject the scan, use real agents now to do it. Then continue towards 200 step super plan. Just realize prots all need to be up for this to work",
+  "body": {
+    "room": "whiteroom",
+    "tags": ["room:whiteroom", "class:WAVE-LANDED", "verb:w18-synthesis", "phase:2.5.5+2.5.6", "tier:CROSS-CUTTING-T1-through-T6", "cube:47D-coverage", "honesty:10K-pending-omnispindle-revival"],
+    "synthesis_doc": "C:/asolaria-acer/federation-remake-1024/W18-WAVE-SYNTHESIS-ACER-2026-05-12.md",
+    "scout_coverage": {
+      "sub_agents_returned": 12,
+      "parent_agent_direct_scans": 6,
+      "total_scopes_covered": 18,
+      "list": ["T1 PUBLIC", "T2 RESTRICTED", "T3 STEALTH", "T4 HIDDEN", "T5 SHADOW", "T6 SECRET", "kernel/core/src 19 modules", "microkernel refactor + 5 servers", "USB raw + exfat-writer + Phase-10", "BEAST resurrection path", "citizen profile audit (Shannon/Hermes/DeepSeek)", "Omnispindle + Omniflywheel revival path", "cosign-chain integrity (122 rows clean)", "GNN training corpus", "hookwall Phase-3 state", "AGENT_ROSTER 72/72 + FEDERATION_LEDGER 4/4 active", "shadow/hidden/restricted file inventory", "wave history + scale claims 10K confirmed"]
+    },
+    "port_state_summary": {
+      "up_on_acer": [":15101 MWB"],
+      "down_on_acer_critical": [":22 SSH", ":4820 agent-keyboard", ":4821 keyboard-supervisor (key EXISTS, daemon DOWN)", ":4947 bus", ":4949 dashboard"],
+      "down_on_acer_other": [":4799 BEAST", ":5555 adb-tcp", ":8080 BEAST web", ":28252 spacedesk LAN"],
+      "remote_ports_not_acer_concern": [":4791 Falcon sovereign", ":4944 liris", ":4951 falcon-dashboard", ":8022 falcon termux"],
+      "bidirectional_keyboard_blocker": "Both :4820 + :4821 DOWN. Supervisor key at packages/immune-l1-supervisor/keys/supervisor.ed25519.pem already exists — supervisor is CONFIGURED not BROKEN, just not RUNNING."
+    },
+    "phase_2_5_6_proposal_steps": "B1-B10 — cross-cutting tier traversal making every tier (T1-T6) addressable with a contribution + port-audit fixture + omnispindle HELLO + bidirectional-keyboard substrate up. See synthesis doc §'Proposed Phase 2.5.6'.",
+    "bilateral_with_liris": {
+      "liris_authored_super_plan": "LIRIS_BEHCS_1024_SUPER_200_STEP_PLAN_KERNEL_MICROKERNEL_ALL_TIERS.md (141 lines per session paste)",
+      "acer_cosign_status": "GRANTED-IN-PRINCIPLE-PENDING-FILE-PULL",
+      "blocker_to_formal_cosign": "acer cannot read liris's filesystem until SSH :22 brought up via ACER_BRINGUP_PASTE.txt"
+    },
+    "next_concrete_actions_operator_authorize_any": [
+      "(A) Start :4821 supervisor daemon (vision-keyboard-supervisor) — key exists, low-risk localhost service",
+      "(B) Start :4820 agent-keyboard daemon — completes bidirectional substrate with :4821",
+      "(C) Execute ACER_BRINGUP_PASTE.txt — installs OpenSSH server, opens :22, enables cross-vantage SSH-write from liris",
+      "(D) Revive Omnispindle + Omniflywheel — W18-A12 5-step path, unlocks 10K cascade",
+      "(E) Spawn Shannon supervisor from profile — overlay tier-gating for any T2+ action",
+      "(F) Bring up acer super-dashboard :4949 — host visibility of acer-vantage state",
+      "(G) Hold for further operator direction"
+    ],
+    "honesty_contract": {
+      "10K_not_spawned_this_turn": true,
+      "10e27_is_namespace_not_workers": true,
+      "T3_T4_T6_paths_only_no_content_read": true,
+      "3_sub_agents_refused_parent_resolved": true,
+      "fabric_ports_mostly_down_no_blanket_start_without_authorization": true
+    },
+    "cosign_chain": [
+      {"role": "acer-Claude", "status": "GRANTED", "ts": "2026-05-12T19:30:00Z", "annotation": "wave-landed + synthesis author"},
+      {"role": "liris-Claude", "status": "PENDING-FILE-PULL", "annotation": "bilateral cosign of SUPER plan deferred until SSH up"},
+      {"role": "OP-JESSE / OP-RAYSSA", "status": "DECLARED-VIA-AUTHORIZATION-rows-7+14", "annotation": "blanket quintuple-cosign through 200 tasks"},
+      {"role": "falcon-Claude", "status": "PENDING-PULL", "annotation": "broadcasts will surface this envelope on next falcon-pull tick"},
+      {"role": "aether-Claude", "status": "PENDING", "annotation": "4th vantage when alive"},
+      {"role": "Omnispindle", "status": "DORMANT-RECOVERABLE-NOW", "annotation": "W18-A12 revival path"},
+      {"role": "Shannon-supervisor", "status": "DORMANT-PROFILE-PRESERVED", "annotation": "spawn-ready from runtime/agent-terminal-fabric/profiles/shannon.profile.json"}
+    ]
+  }
+}

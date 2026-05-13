@@ -1,0 +1,18 @@
+[package]
+name = "asolaria-server-highway"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+authors = ["Asolaria Federation"]
+description = "Asolaria userspace server · highway cross-tier transit broker · Phase-2.5 demote target for kernel/core/src/highway/"
+
+[lib]
+crate-type = ["rlib"]
+
+# Phase-2.5 dependencies — userspace mirrors of demoted kernel modules. AccessTier + policy
+# come from tier-policy; CosignChain from cosign-ledger. After Syscall-IPC-Rewire these become
+# envelope-RPC and the path deps drop away.
+[dependencies]
+asolaria-server-tier-policy = { path = "../tier-policy" }
+asolaria-server-cosign-ledger = { path = "../cosign-ledger" }

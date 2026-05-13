@@ -1,0 +1,43 @@
+name: Security report
+description: Substrate, hookwall, cosign, or auth concern
+title: "[sec] "
+labels: [security, urgent]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Anchor PID:** `ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11`
+
+        **Before filing publicly:** if this is an EXPLOITABLE substrate vulnerability (kernel, ed25519, hookwall bypass, cosign forge),
+        contact operator-pair directly via out-of-band channel FIRST. Use this template ONLY for non-exploit security concerns
+        (e.g. policy gaps, advisory hardening, defensive observations).
+  - type: textarea
+    id: concern
+    attributes:
+      label: Security concern
+    validations:
+      required: true
+  - type: dropdown
+    id: substrate
+    attributes:
+      label: Affected substrate
+      options:
+        - kernel (Phase 2)
+        - hookwall (Phase 3)
+        - GNN (Phase 4)
+        - bus envelopes / cosign (Phase 5)
+        - agent runtime (Phase 6)
+        - dashboard / frontend (Phase 7)
+        - cross-vantage (Phase 8)
+        - sovereignty / vault (Phase 9-10)
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: mitigation
+    attributes:
+      label: Proposed mitigation (if any)
+  - type: textarea
+    id: cosign_history
+    attributes:
+      label: Related cosign-chain rows

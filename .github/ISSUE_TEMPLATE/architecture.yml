@@ -1,0 +1,51 @@
+name: Architecture decision request
+description: Propose a canon-level decision (subsystem, contract, invariant)
+title: "[arch] "
+labels: [architecture, decision, needs-cosign]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Anchor PID:** `ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11`
+        Architecture decisions land in `FEDERATION_DECISIONS.md` as `FD-XXX`. Quintuple cosign may be required.
+  - type: input
+    id: scope
+    attributes:
+      label: Scope (which subsystem, which phase)
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Options considered (≥2 with tradeoffs)
+    validations:
+      required: true
+  - type: textarea
+    id: recommendation
+    attributes:
+      label: Recommendation
+    validations:
+      required: true
+  - type: textarea
+    id: blast_radius
+    attributes:
+      label: Blast radius (what gets touched, who needs to ack)
+    validations:
+      required: true
+  - type: dropdown
+    id: cosign_tier
+    attributes:
+      label: Required cosign tier
+      options:
+        - T1 (single approver)
+        - T2 (operator-pair)
+        - T3 (operator-pair + Big-Pickle)
+        - T4 (quintuple — OP-JESSE + OP-RAYSSA + Amy + Felipe + Dan)
+    validations:
+      required: true

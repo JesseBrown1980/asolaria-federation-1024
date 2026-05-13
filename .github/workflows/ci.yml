@@ -1,0 +1,127 @@
+name: ci
+# Anchor PID: ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11
+# Plan step 10 — lint + node-check + cargo-check scaffold
+# REPO_LAW invariants: BEHCS-1024 native, hookwall-as-primitive, GNN-as-primitive, agent-role canon, no-bloat
+# Per AUTHORIZATION.ndjson row 17 (FULL SYSTEMS quintuple-auth 2026-05-12 → 2026-05-26)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo-check:
+    name: cargo check (workspace)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          toolchain: 1.75
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            kernel/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo check (top-level workspace)
+        run: cargo check --workspace --all-features
+      - name: cargo check (kernel sub-workspace)
+        run: cargo check --manifest-path kernel/Cargo.toml --workspace
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-features -- -D warnings
+
+  node-check:
+    name: node lint + type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Detect Node tooling
+        id: detect
+        run: |
+          if [ -f package.json ]; then echo "have_pkg=true" >> $GITHUB_OUTPUT; else echo "have_pkg=false" >> $GITHUB_OUTPUT; fi
+      - name: npm ci
+        if: steps.detect.outputs.have_pkg == 'true'
+        run: npm ci
+      - name: Lint .mjs (Node syntax-check)
+        run: |
+          set -e
+          find . -name "node_modules" -prune -o -name "*.mjs" -print | while read f; do
+            node --check "$f"
+          done
+
+  schema-check:
+    name: ndjson + json schema sanity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate JSON files parse
+        run: |
+          set -e
+          find . -name "node_modules" -prune -o -name "target" -prune -o -name "*.json" -print | while read f; do
+            python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$f" || { echo "INVALID: $f"; exit 1; }
+          done
+      - name: Validate NDJSON files parse line-by-line
+        run: |
+          set -e
+          find . -name "node_modules" -prune -o -name "*.ndjson" -print | while read f; do
+            python3 -c "import json,sys; [json.loads(l) for l in open(sys.argv[1]) if l.strip()]" "$f" || { echo "INVALID NDJSON: $f"; exit 1; }
+          done
+
+  cosign-chain-link-check:
+    name: cosign-chain sha-link integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify cosign-chain row sha-links
+        run: |
+          if [ -f COSIGN_CHAIN.ndjson ]; then
+            python3 -c "
+          import json, sys
+          prev = None
+          with open('COSIGN_CHAIN.ndjson') as f:
+              for i, line in enumerate(f, 1):
+                  if not line.strip(): continue
+                  row = json.loads(line)
+                  if prev and row.get('prev_sha') != prev:
+                      sys.exit(f'row {i}: prev_sha mismatch (expected {prev}, got {row.get(\"prev_sha\")})')
+                  prev = row.get('row_sha16')
+          print('OK: cosign-chain link-integrity verified')
+          "
+          else
+            echo "no COSIGN_CHAIN.ndjson at top-level (may be tier-1 only)"
+          fi
+
+  no-bloat-check:
+    name: no-bloat invariant (line-budget)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject files >2000 lines (REPO_LAW.md no-bloat)
+        run: |
+          set -e
+          violations=$(find . -name "node_modules" -prune -o -name "target" -prune -o -name "*.lock" -prune -o \( -name "*.mjs" -o -name "*.js" -o -name "*.rs" -o -name "*.py" -o -name "*.ts" \) -print | xargs -I{} wc -l {} | awk '$1 > 2000 && $2 != "total" {print}')
+          if [ -n "$violations" ]; then
+            echo "no-bloat violation (>2000 LOC):"
+            echo "$violations"
+            exit 1
+          fi
+          echo "OK: no source file exceeds 2000 LOC"

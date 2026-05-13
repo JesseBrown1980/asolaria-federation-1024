@@ -1,0 +1,16 @@
+[package]
+name = "asolaria-server-tier-policy"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+authors = ["Asolaria Federation"]
+description = "Asolaria userspace server · tier-policy lookup · Phase-2.5 demote target for kernel/core/src/tier/"
+
+[lib]
+crate-type = ["rlib"]
+
+# Phase-2.5 placeholder dependencies — mirror what kernel/core/src/tier/mod.rs imports.
+# Source uses `alloc::string::String` + `crate::syscall::AccessTier` only — no external crates.
+# Listed below in case Demote-Tier scout finds an internal-crate hop that becomes external.
+[dependencies]

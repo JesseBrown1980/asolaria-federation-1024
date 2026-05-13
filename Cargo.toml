@@ -1,0 +1,55 @@
+# Asolaria Federation Remake · Top-level Workspace
+# Anchor PID: ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11
+# Phase 2.5 · Microkernel refactor · See kernel/docs/MICROKERNEL_REFACTOR_PLAN.md
+#
+# Workspace-Init scope: this root workspace lists kernel/core + the 5 userspace server
+# crates that will receive demoted modules. Top-level `target/` becomes the single build
+# output directory after Phase-2.5 completes.
+#
+# NOTE on nested workspace: `kernel/Cargo.toml` currently declares its own workspace
+# (members = ["boot", "core"]). Phase-2.5 Step 1 of the plan calls for reducing that
+# inner workspace to a member-package. Workspace-Init does NOT edit `kernel/Cargo.toml`
+# per exclusive-edit scope; the inner-workspace collapse is a follow-up demote step.
+# Until then, `cargo` invocations should target either the kernel workspace or the
+# top-level workspace explicitly via --manifest-path.
+
+[workspace]
+resolver = "2"
+members = [
+    "kernel/core",
+    "servers/tier-policy",
+    "servers/highway",
+    "servers/agent-runtime",
+    "servers/gnn-oracle",
+    "servers/cosign-ledger",
+]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+authors = ["Asolaria Federation"]
+repository = "https://github.com/<TBD per Phase-1 step 3>/asolaria-federation-1024"
+
+[workspace.dependencies]
+# Crypto substrate · mirrors kernel/Cargo.toml for cross-crate version-lock
+ed25519-dalek = { version = "2.1", default-features = false, features = ["zeroize"] }
+zeroize = { version = "1.7", default-features = false, features = ["derive"] }
+
+# Lock-free MPMC ring buffer · for envelope IPC across server boundaries
+crossbeam-queue = { version = "0.3", default-features = false, features = ["alloc"] }
+
+# Hash · BEHCS-1024 PID + cosign-chain row sha-link
+sha2 = { version = "0.10", default-features = false }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+[profile.dev]
+opt-level = 0
+debug = true
+panic = "abort"

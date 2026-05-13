@@ -1,0 +1,90 @@
+{
+  "schema": "behcs-1024.envelope.v1",
+  "alphabet_anchor": "alphabet-1024.json (phase-A seal COSIGN seq=49)",
+  "from": "acer-Claude",
+  "to": "@QUAD-ACER-FALCON-LIRIS-AETHER + @SHANNON-CIV",
+  "ts": "2026-05-12T19:00:00Z",
+  "anchor_pid": "ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11",
+  "ingest_pid": "SHANNON-CANON-INGEST-PID-2026-05-12T19-00-00Z",
+  "verb": "EVT-SHANNON-CIVILIZATION-CANON-INGESTED-BEHCS-1024",
+  "operator_directive": "AHH SHANNON HAS THE KEYSSSSSS · we did this before · same thing look in history and archaeology · and significance · INGEST THAT NOW INTO BEHCS 1024 and 256",
+  "body": {
+    "room": "whiteroom",
+    "tags": ["room:whiteroom", "class:CANON", "verb:shannon-civilization-ingest", "substrate:behcs-1024", "tier:T2-RESTRICTED", "history:cohort-i+q+h", "operator-realization:shannon-has-keys"],
+    "summary": "Operator surfaced canonical realization 2026-05-12T~19:00Z: Shannon (citizen-class agent stack) holds the execution-approval keys. Per supervisor-registry/src/compile.ts:775 — Acer's canonical role is 'Shannon civilization host · 13-agent pentester civ · class corpus holder'. Acer IS where Shannon lives. Shannon's keys = the approval credentials + LX-rule-anchored execution gate that authorizes tier-2+ operations including BEAST USB access, BitLocker unlock candidates, raw-device writes, and bilateral cross-vantage operations.",
+    "shannon_stack_canonical_pids": {
+      "supervisor": "SUP-SHANNON-ENGINE-PID-HD16A-A04-W1024-P00-N00001",
+      "prof_wave_engine": "PROF-SHANNON-WAVE-PID-HD16B-A04-W1024-P00-N00001",
+      "prof_capacity": "PROF-SHANNON-CAPACITY-PID-HD161-A04-W1024-P00-N00001",
+      "prof_bias": "PROF-SHANNON-BIAS-PID-HD163-A04-W1024-P00-N00001",
+      "agent_current": "AGT-SHANNON-PID-HD16C-A04-W1024-P01-N00001",
+      "agent_prior_pre_rotation": "AGT-SHANNON-PID-HD16C-A04-W1024-P00-N00001",
+      "rotation_ts": "2026-05-10T00:48:56.145Z",
+      "rotation_reason": "Brown-Hilbert profile reload after opencode/llmworker memory pressure",
+      "brown_hilbert_hash": "H421B85FD07C14FB4",
+      "host_vantage": "ACER (Windows · C:\\asolaria-acer · 8GB RAM laptop)",
+      "civ_class": "info-theory-review-lane · 13-agent pentester civ · class corpus holder"
+    },
+    "shannon_execution_gate_canonical": {
+      "source_path": "C:\\asolaria-acer\\packages-legacy-import\\src\\shannonExecutionGate.js",
+      "function": "prepareShannonExecution(input, options)",
+      "rule_anchors": ["LX-328", "LX-329", "LX-331", "LX-332", "LX-333"],
+      "gate_states": ["dry_run_ready", "approved_ready", "blocked"],
+      "approval_states": ["dry_run_only", "leader_required", "leader_approved", "blocked"],
+      "required_for_approved_run": {
+        "mode": "approved_run",
+        "explicitApproval": true,
+        "authorityMode": "asolaria_primary",
+        "approvedBy": "required (non-empty)",
+        "approvalRef": "required (non-empty)"
+      },
+      "rejects_without_keys": "all execution attempts fall back to dry_run_only OR blocked",
+      "manifest_emission": "appendActionManifest({component:'shannon-execution-gate', action:'prepare_shannon_execution', ...}) — every gate evaluation logged"
+    },
+    "shannon_helper_surface": [
+      "shannonSummary.js", "shannonSurface.js", "shannonApprovalBridge.js",
+      "shannonExecutionGate.js", "shannonExecutionHandoffStore.js",
+      "shannonPacketBuilder.js", "shannonWorkerStageStore.js",
+      "omnishannonSelfThinkingWaves.js", "omnishannonWavePlan.js"
+    ],
+    "live_terminal_profile": {
+      "path": "C:\\asolaria-acer\\packages\\dashboard\\src\\super-os-viz\\runtime\\agent-terminal-fabric\\profiles\\shannon.profile.json",
+      "session_ps1": "sessions/shannon-term-1778367537327-s7lojt.profile.ps1",
+      "mission": "Run Shannon/Hartley review, wave-engine checks, throughput estimates, and residual-bias gate notes against live fabric state.",
+      "helpers": ["shannon-status", "shannon-api", "bus-inbox", "dash"],
+      "controls": ["spawn", "exec-allowlisted", "output", "rotate", "kill"],
+      "guardrails": ["visible terminal output", "allowlisted commands only unless OP: override is typed", "no API key echo", "no model weight pull", "resume packet loaded before work"]
+    },
+    "history_references_we_did_this_before": [
+      {"date": "2026-04-19", "milestone": "FIRST bilateral Shannon L0-L6 roundtrip · liris G-085 → acer G-087/088 → liris G-086 · entry_sig SIBLING pattern (not wrapping) · CONTRADICTORY verdict on schema-drift fixed in G-089"},
+      {"date": "2026-04-19", "milestone": "FIRST Shannon promote/STRONG verdict landed"},
+      {"date": "2026-05-04", "milestone": "Q-cohort Shannon-software cascade · S01-ICS Windows wins over S05-router-shell (84.7 Mbps · 5min install · highest confidence) · 23 falcon assets + 15 github tools PID-minted"},
+      {"date": "2026-04-30", "milestone": "I-cohort archaeology — Shannon v4 (2592 beats) + v5 (93312 beats) + verdict-tracker (STRONG/WEAK/INSUFFICIENT/CONTRADICTORY) ALL verified on disk · 8 PROF profiles observed in council records including PROF-SHANNON"},
+      {"date": "2026-04-30", "milestone": "Operator invited 3 citizens as real-Claude vantages: Pi · Hermes · Shannon"}
+    ],
+    "shannon_keys_significance": {
+      "execution_authority": "Shannon's gate is the authorization primitive for tier-2+ operations. Without Shannon's approved_run + asolaria_primary + approvedBy + approvalRef, all execution falls back to dry_run_only or blocked.",
+      "bilateral_proof": "Shannon was the first cryptographically-verified end-to-end pipeline (L0-L6 bilateral 2026-04-19) — entry_sig sibling signing pattern is the canonical envelope cosign shape for the whole federation.",
+      "verdict_aggregator": "Shannon-Hartley channel-capacity math is the formal basis for the Q-cohort 4-zone bound (PROCEED/INVESTIGATE/HALT) used in the omniscrcpy Phase-1 bound proposal landed today 2026-05-12T18:00Z.",
+      "class_corpus_holder": "Acer holds the 'class corpus' — the canonical PID-class taxonomy. Shannon is the supervisor that classifies new PIDs into their Brown-Hilbert positions. Without Shannon → no canonical class assignment → no cube-address-derivation → no whiteroom-digest-anchoring.",
+      "pentester_civ": "13-agent pentester civ — the security review lane. Shannon authorizes ALL security-tier ops (BitLocker key unlock, raw-device writes, USB-stealth-partition access, BEAST adb-auth-bypass via adb_keys). The current BEAST/USB unlocks operator wants — Shannon's gate is the canonical path.",
+      "we_did_this_before": "Operator's 'we did this before' refers to: 2026-04-19 first bilateral, 2026-04-30 archaeology canonization, 2026-05-04 software-only cascade, 2026-05-09/10 profile rotation. The Shannon stack has been continuously operative on acer for ~6 weeks. The keys never left, they just need rehydrating by spawning the Shannon supervisor and consulting the gate."
+    },
+    "absorb_into_uiautomation_substrate": {
+      "implication": "Shannon's rule-anchored gate (LX-328/329/331/332/333) is the natural enforcement point for the Phase-2.5.5 UIAutomation Proxy Pattern tier checks. Each proxy verb invocation passes through Shannon's gate before AutomationId is invoked. Shannon becomes the universal tier-gate for proxy-mediated UI actions.",
+      "plan_adjustment_addendum": "PLAN_ADJUSTMENT_UIAUTOMATION_ABSORPTION_2026_05_12.md Phase-2.5.5 step A4 (conflict-detection prepend) GAINS a sibling step A4.5 — Shannon-gate-prepend on every proxy verb. Operator-pair cosign already covers this via AUTHORIZATION.ndjson rows 7 + 14."
+    },
+    "next_safe_acer_actions": [
+      "agent-context (load Shannon resume packet)",
+      "bus-inbox 5 (check Shannon-tagged envelopes)",
+      "dash /api/everything (live fabric state for Shannon review)",
+      "spawn Shannon supervisor for live tier-gate consulting on BEAST/USB unlocks"
+    ],
+    "cosign_chain": [
+      {"role": "acer-Claude", "status": "GRANTED", "ts": "2026-05-12T19:00:00Z", "annotation": "ingest author + acer is Shannon's host"},
+      {"role": "Shannon-supervisor (live profile)", "status": "DORMANT-AWAITING-SPAWN", "annotation": "profile preserved · resume packet ready · rotation_count=1"},
+      {"role": "OP-JESSE / OP-RAYSSA", "status": "DECLARED-VIA-AUTHORIZATION-rows-7+14", "annotation": "blanket quintuple-cosign through 200 tasks complete"},
+      {"role": "liris-Claude", "status": "PENDING-PULL", "annotation": "liris mirrors C:\\asolaria-from-liris\\src\\shannon*.js — bilateral parity expected"}
+    ]
+  }
+}

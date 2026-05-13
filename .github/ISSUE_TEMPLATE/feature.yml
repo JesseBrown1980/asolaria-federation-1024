@@ -1,0 +1,53 @@
+name: Feature request
+description: Propose a new federation capability
+title: "[feat] "
+labels: [feature, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Anchor PID:** `ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11`
+        All features must respect REPO_LAW.md invariants (BEHCS-1024 native, hookwall-as-primitive, GNN-as-primitive, no-bloat).
+  - type: input
+    id: phase
+    attributes:
+      label: Which 200-step plan phase does this map to?
+      placeholder: "Phase X (steps NN-MM)"
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation (why now, what blocks without it)
+    validations:
+      required: true
+  - type: textarea
+    id: design
+    attributes:
+      label: Proposed design (≤300 words, code/diagram allowed)
+    validations:
+      required: true
+  - type: textarea
+    id: verify
+    attributes:
+      label: Verify gate (what proves it's done)
+    validations:
+      required: true
+  - type: checkboxes
+    id: invariants
+    attributes:
+      label: REPO_LAW invariants respected
+      options:
+        - label: BEHCS-1024 native (no BEHCS-256 regression)
+          required: true
+        - label: hookwall fires on every relevant action
+          required: true
+        - label: no-bloat (file ≤2000 LOC; abstraction earns its keep)
+          required: true
+  - type: dropdown
+    id: vantage
+    attributes:
+      label: Primary vantage
+      options: [acer, liris, falcon, aether, multi]
+    validations:
+      required: true

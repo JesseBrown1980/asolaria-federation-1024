@@ -1,0 +1,1 @@
+{"verb":"EVT-VIEWER-STATUS","from":"omniscrcpy-spacedesk-viewer-proxy-acer","ts":"2026-05-12T20:31:15.621Z","body":{"room":"whiteroom","tags":["room:whiteroom","class:CONTROL","verb:viewer:status","substrate:uiautomation-mfc","vantage:acer"],"result":{"ok":true,"verb":"viewer:status","processes":["10140|spacedeskWindowsVIEWER|spacedesk Viewer for Windows 7"]}}}

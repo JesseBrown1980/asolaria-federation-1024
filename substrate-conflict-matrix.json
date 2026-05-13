@@ -1,0 +1,84 @@
+{
+  "schema_version": "0.1",
+  "anchor_pid": "ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11",
+  "authored_at": "2026-05-12T22:35:00Z",
+  "companion_md": "SUBSTRATE_CONFLICT_MATRIX.md",
+  "rows": [
+    {
+      "id": "USB_CABLE_FALCON_ACER",
+      "physical_resource": "USB Type-C cable falcon-to-acer/liris",
+      "competitors": [
+        {"name": "adb-scrcpy-mirror", "verb_prefix": ["omniscrcpy:type", "omniscrcpy:tap", "omniscrcpy:key", "omniscrcpy:exec", "omniscrcpy:relay", "scrcpy:"]},
+        {"name": "spacedesk-usb-android", "verb_prefix": ["spacedesk:tree:usb-android"]},
+        {"name": "spacedesk-usb-ios", "verb_prefix": ["spacedesk:tree:usb-ios"]}
+      ],
+      "coexistence": "EXCLUSIVE",
+      "policy": "incumbent_wins_operator_cosign_to_swap",
+      "swap_envelope_type": "USB_SUBSTRATE_HANDOFF",
+      "incumbent_probe": "adb devices | findstr device"
+    },
+    {
+      "id": "LAN_TCP_PORTS",
+      "physical_resource": "LAN ethernet (per-port multiplex)",
+      "coexistence": "COEXIST_DIFFERENT_PORTS",
+      "policy": "os_multiplexes",
+      "collision_envelope": "PORT_BIND_COLLISION"
+    },
+    {
+      "id": "USB_SOVLINUX_2TB_RAW",
+      "physical_resource": "\\\\.\\PHYSICALDRIVE2 (USB-SOVLINUX-2TB when present)",
+      "competitors": [
+        {"name": "usb_raw_io.py", "verb_prefix": ["usb-raw:read", "usb-raw:write"]},
+        {"name": "asolaria-exfat-driver-liris", "verb_prefix": ["exfat:"]},
+        {"name": "windows-fs-mount", "verb_prefix": ["explorer:"]},
+        {"name": "build-usb-img-script", "verb_prefix": ["kernel:build-img"]}
+      ],
+      "coexistence": "EXCLUSIVE_PER_WRITE_COEXIST_FOR_READ",
+      "policy": "raw_writes_require_lock_dismount_plus_quintuple_cosign",
+      "auth_token": "quintuple-2026-05-25"
+    },
+    {
+      "id": "UIAUTOMATION_SINGLETON",
+      "physical_resource": "UIAutomation tree in user session",
+      "coexistence": "COEXIST_AT_READ_SERIALIZE_AT_WRITE",
+      "policy": "per_process_lockfile_held_across_invoke",
+      "lockfile_pattern": "%TEMP%\\omniscrcpy-uia-<pid>.lock",
+      "lock_timeout_ms": 5000
+    },
+    {
+      "id": "SAMSUNG_KIES_PROTOCOL",
+      "physical_resource": "Samsung-device USB endpoint",
+      "competitors": [
+        {"name": "adb", "verb_prefix": ["adb:", "scrcpy:"]},
+        {"name": "samsung-kies (ss_conn_service)", "verb_prefix": ["kies:"]},
+        {"name": "samsung-smart-switch", "verb_prefix": ["smart-switch:"]},
+        {"name": "mtp-wpd", "verb_prefix": ["explorer:wpd:"]}
+      ],
+      "coexistence": "EXCLUSIVE_PER_PROTOCOL_CLAIM",
+      "policy": "incumbent_wins_service_state_probe_required"
+    },
+    {
+      "id": "WPD_CLASS_DRIVES",
+      "physical_resource": "USB stick advertising WPD class (Windows Portable Devices)",
+      "competitors": [
+        {"name": "windows-fs-mount", "verb_prefix": ["explorer:fs:"]},
+        {"name": "wpd-mtp-shell-namespace", "verb_prefix": ["explorer:wpd:"]},
+        {"name": "usb_raw_io.py", "verb_prefix": ["usb-raw:"]}
+      ],
+      "coexistence": "MUTUALLY_EXCLUSIVE_AT_ENUMERATION_LAYER",
+      "policy": "raw_io_canonical_when_wpd_fs_disagrees"
+    },
+    {
+      "id": "BEAST_DEVICE_CONTROL",
+      "physical_resource": "BEAST S22 Ultra control channels",
+      "competitors": [
+        {"name": "direct-lan-post-4799", "verb_prefix": ["beast:exec"]},
+        {"name": "hookwall-v2-fan-out", "verb_prefix": ["hookwall:fan-out:beast"]},
+        {"name": "omniscrcpy-broadcasts-relay", "verb_prefix": ["omniscrcpy:relay:beast"]}
+      ],
+      "coexistence": "COEXIST_AT_DELIVERY_FAN_OUT_OK_AT_LISTENER",
+      "policy": "idempotent_envelope_ids_prevent_double_execution"
+    }
+  ],
+  "default_check_when_no_match": "PROCEED"
+}

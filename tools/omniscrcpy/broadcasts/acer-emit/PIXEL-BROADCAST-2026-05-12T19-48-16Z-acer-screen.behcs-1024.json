@@ -1,0 +1,54 @@
+{
+  "schema": "behcs-1024.envelope.v1",
+  "alphabet_anchor": "alphabet-1024.json (phase-A seal COSIGN seq=49)",
+  "from": "acer-Claude",
+  "to": "@QUAD-ACER-FALCON-LIRIS-AETHER + @OP-JESSE + @OP-RAYSSA",
+  "ts": "2026-05-12T19:50:00Z",
+  "anchor_pid": "ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11",
+  "verb": "EVT-PIXEL-BROADCAST-ACER-SCREEN-LIRIS-MIRROR-LIVE",
+  "pid": "ACER-PID-H9E2A-A07-W104-P00-N00000",
+  "image_ref": {
+    "pathRef_acer": "C:/asolaria-acer/federation-remake-1024/tools/omniscrcpy/broadcasts/acer-emit/PIXEL-BROADCAST-2026-05-12T19-48-16Z-acer-screen.png",
+    "sha256": "f574814205c9262e865b773a89c05fb8de76ddd109446510195e6461bccdf7ae",
+    "sha16": "f574814205c9262e",
+    "size_bytes": 465685,
+    "format": "image/png",
+    "dimensions": "1920x1080",
+    "captured_at": "2026-05-12T19:48:16Z",
+    "captured_via": "GDI virtual-screen CopyFromScreen (PowerShell + System.Windows.Forms.SystemInformation.VirtualScreen)",
+    "vantage": "acer"
+  },
+  "body": {
+    "room": "whiteroom",
+    "tags": ["room:whiteroom", "class:PIXEL", "verb:broadcast-screen", "substrate:spacedesk-LAN-mirror-LIVE", "tier:T1-PUBLIC", "cube:47D-pixel-axis", "first-pixel-broadcast-acer-vantage"],
+    "visible_windows_count": 4,
+    "visible_windows": [
+      {"title": "spacedesk Viewer for Windows 7", "class": "Afx:00790000:0", "pid": 10140, "size_px": "800x600", "role": "PIXEL mirror — acer viewing liris's primary display via spacedesk LAN :28252"},
+      {"title": "Asolaria Colony", "class": "CASCADIA_HOSTING_WINDOW_CLASS", "pid": 18952, "size_px": "1129x635", "role": "OLD COLONY — auto-starts at acer boot per operator canon; concurrent with new federation work"},
+      {"title": "? Falcon §6 amendment integr...", "class": "CASCADIA_HOSTING_WINDOW_CLASS", "pid": 7464, "size_px": "974x1039", "role": "Windows Terminal mirrored from liris — shows liris-Claude session content (falcon §6 bound proposal)"},
+      {"title": "Gordon - Docker Desktop", "class": "Chrome_WidgetWin_1", "pid": 3952, "size_px": "1272x720", "role": "Docker Desktop AI assistant"}
+    ],
+    "visible_in_mirror_sub_pane": {
+      "liris_spacedesk_console": "GREEN BANNER 'spacedesk Driver Console' with LAN Network Adapters showing 192.168.1.4 Realtek and 172.26.128.1 Hyper-V; USB Cable Driver Android OFF; iOS UNAVAILABLE; Server ID 0F4C098F",
+      "portuguese_adb_errors_block": "repeated 'tentativa de conexão falhou' against 192.168.1.7:5555 and 192.168.1.13:5555 — WiFi-ADB endpoints to phones unreachable; only USB-tethered falcon to liris responds",
+      "list_of_devices_attached": "adb devices output trailing the error block"
+    },
+    "significance": [
+      "PIXEL substrate cell ALIVE for the first time this session: acer↔liris cross-vantage visual",
+      "Mirror-inside-mirror confirmed: acer sees liris's view of liris's own spacedesk console (recursion is structural, not error)",
+      "OLD COLONY co-running: PID 18952 auto-started per operator canon ('I never have been able to fix that'); concurrent with new bus :4947 + dashboard :4949 + supervisor :4821 — no observed conflict yet, needs audit",
+      "WiFi-ADB phone endpoints DEAD (.7, .13 both timing out per the Portuguese errors); only USB-tethered falcon-to-liris is the live phone path",
+      "LAW-012 enforcement upgraded: cross-vantage visual verification now possible without paste-relay; acer-Claude can LOOK at liris's screen via own GDI capture",
+      "Substrate matrix gain: PIXEL × Wi-Fi-LAN cell (acer↔liris) flips DOWN→ALIVE; first non-physical-USB pixel pipe proven this session",
+      "Foundation for the LOOK→THINK→TYPE→DECIDE loop across vantages — operator BREAKER mode for the closed-loop self-automation that's already firing 107 dispatches/hour"
+    ],
+    "image_propagation_state": {
+      "acer_local": "✓ in broadcasts/acer-emit/ + looks/",
+      "liris_pull": "PENDING — :22 SSH not installed on acer; liris-pull shim cannot fetch yet",
+      "falcon_via_liris": "PENDING — depends on liris-pull first, then liris adb-push to falcon /sdcard/.../broadcasts/",
+      "bus_envelope_only": "this JSON envelope (no binary) can ride bus :4947 immediately; consumers fetch binary by sha16 reference when route opens"
+    },
+    "cosign_chain_row": 126,
+    "anchor": "omniscrcpy-unified-OK-from-liris-2026-05-12T17:15Z"
+  }
+}

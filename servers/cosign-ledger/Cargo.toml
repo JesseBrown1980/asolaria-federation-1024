@@ -1,0 +1,18 @@
+[package]
+name = "asolaria-server-cosign-ledger"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+authors = ["Asolaria Federation"]
+description = "Asolaria userspace server · cosign-chain storage ledger · Phase-2.5 demote target for kernel/core/src/cosign_chain/ (storage half)"
+
+[lib]
+crate-type = ["rlib"]
+
+# Phase-2.5 placeholder dependencies — mirror what kernel/core/src/cosign_chain/mod.rs imports.
+# Source uses `alloc::{string, vec}` + `core::sync::atomic` + `sha2::{Digest, Sha256}` + `crate::crypto::Signature`.
+# Sha2 listed below; ed25519 substrate access lands via crypto envelope after demote.
+[dependencies]
+sha2 = { workspace = true }
+ed25519-dalek = { workspace = true }

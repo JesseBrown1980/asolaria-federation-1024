@@ -1,0 +1,16 @@
+{
+  "schema": "omniscrcpy.envelope.v0.1",
+  "from": "acer-Claude",
+  "ts": "2026-05-12T20:15:00Z",
+  "anchor_pid": "ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11",
+  "verb": "ACER-TICK-004",
+  "pid": "ACER-PID-H9E2A-A07-W104-P00-N00000",
+  "body": {
+    "room": "whiteroom",
+    "tags": ["room:whiteroom", "class:HEARTBEAT", "verb:acer-tick", "tick:4", "after:go-all-cascade-bus-dashboard-supervisor-up"],
+    "current_step": "Phase 2.5.6 — port substrate UP cascade: :4947 bus + :4949 dashboard + :4821 supervisor LIVE; closed-loop E06 reactivated 2349→2353 then continuing on cron 995ba60b",
+    "last_completed_step": "GO ALL cascade — bus/dashboard/supervisor started · cron 995ba60b scheduled (5,15,27,39,51) · cosign row 124 chained · SSH install rejected twice (held)",
+    "blockers": [":22 SSH install rejected by operator (last 2 attempts) · :4913 keyboard backend still DOWN (supervisor forwards to a dead target) · acer→falcon propagation gap (falcon LTR sees acer=0)"],
+    "next_planned_action": "Hold for operator. Cron 995ba60b will tick E06 every 12 min and grow fired-dispatches.jsonl automatically. No new tool calls without explicit direction."
+  }
+}

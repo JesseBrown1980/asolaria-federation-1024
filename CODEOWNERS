@@ -1,0 +1,46 @@
+# CODEOWNERS for asolaria-federation-1024
+# Anchor PID: ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11
+#
+# Reviewers/approvers per code area. Branch protection on `main` requires
+# all listed owners + 5-cosign quintuple-auth (per AUTHORIZATION.ndjson row 17)
+# + CI green before merge.
+#
+# Github usernames TBD per FEDERATION_DECISIONS.md PD-001; until owner-of-handle
+# is resolved, this file lists the AGENT_ROSTER role-ids that authoritatively
+# represent the human signers. Github username mapping happens at step-4 repo-create.
+#
+# Role-id reference: AGENT_ROSTER.ndjson rows for operator-pair + named roles.
+
+# Default — every file requires operator-pair + Hermes coordinator
+*                                          @OP-JESSE @OP-RAYSSA @Hermes
+
+# Kernel substrate (Phase 2) — additional kernel-class reviewer
+/kernel/                                   @OP-JESSE @OP-RAYSSA @Hermes @Space-deck-driver
+/Cargo.toml                                @OP-JESSE @OP-RAYSSA @Hermes @Space-deck-driver
+
+# Userspace servers (Phase 2.5 demote targets)
+/servers/                                  @OP-JESSE @OP-RAYSSA @Hermes @Space-deck-driver
+
+# Bus + envelope contracts — Space-agent vantage-ack required for cross-vantage routing
+/tools/omniscrcpy/                         @OP-JESSE @OP-RAYSSA @Hermes @Space-agent
+
+# Authorization + cosign-chain — operator-pair + Big-Pickle architect-class witness
+/AUTHORIZATION.ndjson                      @OP-JESSE @OP-RAYSSA @Big-Pickle
+/FEDERATION_LEDGER.ndjson                  @OP-JESSE @OP-RAYSSA @Big-Pickle
+/FEDERATION_DECISIONS.md                   @OP-JESSE @OP-RAYSSA @Big-Pickle
+/REPO_LAW.md                               @OP-JESSE @OP-RAYSSA @Big-Pickle
+
+# Phase plans + substrate matrix
+/ASOLARIA_FEDERATION_REMAKE_200_STEP_PLAN.md @OP-JESSE @OP-RAYSSA @Hermes
+/PLAN_ADJUSTMENT_*.md                      @OP-JESSE @OP-RAYSSA @Hermes
+/SUBSTRATE_CONFLICT_MATRIX.md              @OP-JESSE @OP-RAYSSA @Hermes
+/substrate-conflict-matrix.json            @OP-JESSE @OP-RAYSSA @Hermes
+
+# GNN inference lane (Phase 4)
+/servers/gnn-oracle/                       @OP-JESSE @OP-RAYSSA @Hermes @PI
+
+# Cosign-ledger server (Phase 5)
+/servers/cosign-ledger/                    @OP-JESSE @OP-RAYSSA @Hermes @Big-Pickle
+
+# CI + workflows — operator-pair + Omnispindle supervisor
+/.github/                                  @OP-JESSE @OP-RAYSSA @Omnispindle
