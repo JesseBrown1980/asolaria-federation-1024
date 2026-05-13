@@ -60,8 +60,11 @@ tmp/
 !Cargo.lock
 
 # Federation-specific
-broadcasts/*/  # acer-emit/, liris-emit/, falcon-emit/, aether-emit/ — runtime envelopes (not source)
+# Runtime broadcast envelopes are receipts, not source. Existing tracked receipts stay tracked.
+broadcasts/*/
+**/broadcasts/*/
 !broadcasts/.gitkeep
+!**/broadcasts/.gitkeep
 *.behcs-shadow
 *.stealth
 .fired-dispatches.jsonl
