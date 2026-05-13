@@ -23,6 +23,7 @@ pub mod frame_alloc;
 pub mod hookwall;
 pub mod pid;
 pub mod syscall;
+pub mod vfs;
 // Phase-2.5 cycle-72: demote was premature — kernel modules must remain present-and-callable
 // until Syscall-IPC-Rewire converts each call site to envelope RPC. Servers/* mirrors at
 // servers/{cosign-ledger,tier-policy,highway,agent-runtime,gnn-oracle}/src/lib.rs are the

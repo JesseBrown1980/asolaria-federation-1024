@@ -78,29 +78,36 @@ pub enum AccessTier {
 
 /// 1. Read `len` bytes from handle `fd` into `buf`. Returns bytes read.
 ///
-/// Phase-3 v0.1.9: input-validation half-wire. Rejects `len > buf.len()` at the
-/// signature level (signature soundness — buffer overrun would be UB). Conservative
-/// choice: compare against `buf.len()` rather than a kernel-defined max, since the
-/// VFS-side max is a v0.2 kernel-state singleton. Returns `Unimplemented` for valid
-/// inputs until the VFS handle table lands in v0.2.
-pub fn sys_read(_fd: Handle, buf: &mut [u8], len: usize) -> Result<usize, SyscallErr> {
+/// Phase-3 v0.3.2: FULL WIRE to `crate::vfs::vfs_read`. Keeps the `len > buf.len()`
+/// signature-level guard (buffer overrun would be UB), then routes by fd value:
+/// STDIN_FD (0) returns Ok(0) (EOF; no input plumbed in v0.1); STDOUT/STDERR
+/// return InvalidOpForFd; all other fds return InvalidFd. Errors mapped at the
+/// syscall boundary: any `VfsErr` → `SyscallErr::Invalid`.
+pub fn sys_read(fd: Handle, buf: &mut [u8], len: usize) -> Result<usize, SyscallErr> {
     if len > buf.len() {
         return Err(SyscallErr::Invalid);
     }
-    Err(SyscallErr::Unimplemented)
+    match crate::vfs::vfs_read(fd, buf, len) {
+        Ok(n) => Ok(n),
+        Err(_) => Err(SyscallErr::Invalid),
+    }
 }
 
 /// 2. Write `buf` to handle `fd`. Returns bytes written.
 ///
-/// Phase-3 v0.1.10: input-validation half-wire. Rejects empty `buf` at the signature
-/// level (a zero-byte write is meaningless per POSIX-style semantics — distinct from
-/// fsync). Returns `Unimplemented` for valid inputs until the VFS handle table lands
-/// in v0.2.
-pub fn sys_write(_fd: Handle, buf: &[u8]) -> Result<usize, SyscallErr> {
+/// Phase-3 v0.3.2: FULL WIRE to `crate::vfs::vfs_write`. Keeps the empty-buf
+/// signature-level guard, then routes by fd value: STDOUT_FD (1) and STDERR_FD
+/// (2) accept with Ok(buf.len()); STDIN_FD returns InvalidOpForFd; all other
+/// fds return InvalidFd. Errors mapped at the syscall boundary: any `VfsErr`
+/// → `SyscallErr::Invalid`.
+pub fn sys_write(fd: Handle, buf: &[u8]) -> Result<usize, SyscallErr> {
     if buf.is_empty() {
         return Err(SyscallErr::Invalid);
     }
-    Err(SyscallErr::Unimplemented)
+    match crate::vfs::vfs_write(fd, buf) {
+        Ok(n) => Ok(n),
+        Err(_) => Err(SyscallErr::Invalid),
+    }
 }
 
 /// 3. Execute a BEHCS-1024 envelope. NOT a path — envelopes are the dispatch unit.
@@ -411,10 +418,40 @@ mod tests {
         //   sys_exec          (2026-05-13 v0.3.0 → envelope::dispatch_enqueue_bytes + EXEC_HANDLE_NEXT)
         //   sys_mmap          (2026-05-13 v0.3.1 → frame_alloc::alloc_pages, virtual-range scaffold)
         //   sys_munmap        (2026-05-13 v0.3.1 → frame_alloc::free_pages, v0.1 no-op release)
-        // Remaining half-wires (Invalid on bad input; Unimplemented on valid):
+        //   sys_read          (2026-05-13 v0.3.2 → vfs::vfs_read, routing-by-fd-value scaffold)
+        //   sys_write         (2026-05-13 v0.3.2 → vfs::vfs_write, routing-by-fd-value scaffold)
+        // All 16 canonical syscalls are now FULL-wired (or DIVERGING STUB for sys_exit).
+        // No `assert sys_X returns Unimplemented for valid inputs` assertions remain.
+    }
+
+    #[test]
+    fn sys_read_stdin_returns_eof_v0_3_2() {
+        // Phase-3 v0.3.2: FULL WIRE — fd 0 (stdin) returns Ok(0) (no input source v0.1).
         let mut buf = [0u8; 16];
-        assert_eq!(sys_read(0, &mut buf, 8), Err(SyscallErr::Unimplemented));
-        assert_eq!(sys_write(0, &buf), Err(SyscallErr::Unimplemented));
+        assert_eq!(sys_read(0, &mut buf, 8), Ok(0));
+    }
+
+    #[test]
+    fn sys_read_invalid_fd_returns_invalid() {
+        // Phase-3 v0.3.2: FULL WIRE — fds outside reserved range return Invalid.
+        let mut buf = [0u8; 16];
+        assert_eq!(sys_read(99, &mut buf, 8), Err(SyscallErr::Invalid));
+        assert_eq!(sys_read(1, &mut buf, 8), Err(SyscallErr::Invalid)); // stdout
+        assert_eq!(sys_read(2, &mut buf, 8), Err(SyscallErr::Invalid)); // stderr
+    }
+
+    #[test]
+    fn sys_write_stdout_returns_buf_len_v0_3_2() {
+        // Phase-3 v0.3.2: FULL WIRE — fd 1 (stdout) accepts; returns buf.len().
+        assert_eq!(sys_write(1, b"hello"), Ok(5));
+        assert_eq!(sys_write(2, b"err msg"), Ok(7)); // stderr
+    }
+
+    #[test]
+    fn sys_write_invalid_fd_returns_invalid() {
+        // Phase-3 v0.3.2: FULL WIRE — fds outside reserved range OR stdin return Invalid.
+        assert_eq!(sys_write(0, b"x"), Err(SyscallErr::Invalid)); // stdin
+        assert_eq!(sys_write(99, b"x"), Err(SyscallErr::Invalid));
     }
 
     #[test]
@@ -500,10 +537,12 @@ mod tests {
     }
 
     #[test]
-    fn sys_read_returns_unimplemented_for_valid_inputs() {
+    fn sys_read_stdin_returns_ok_zero_v0_3_2() {
+        // Phase-3 v0.3.2: FULL WIRE — sys_read on STDIN_FD (0) returns Ok(0) (EOF).
+        // No source plumbed in v0.1; vfs::vfs_read backs this.
         let mut buf = [0u8; 8];
-        assert_eq!(sys_read(0, &mut buf, 8), Err(SyscallErr::Unimplemented));
-        assert_eq!(sys_read(0, &mut buf, 0), Err(SyscallErr::Unimplemented));
+        assert_eq!(sys_read(0, &mut buf, 8), Ok(0));
+        assert_eq!(sys_read(0, &mut buf, 0), Ok(0));
     }
 
     #[test]
@@ -513,9 +552,11 @@ mod tests {
     }
 
     #[test]
-    fn sys_write_returns_unimplemented_for_valid_inputs() {
+    fn sys_write_to_stdin_returns_invalid_v0_3_2() {
+        // Phase-3 v0.3.2: FULL WIRE — sys_write on STDIN_FD (0) returns Invalid
+        // (can't write to stdin). vfs::vfs_write returns InvalidOpForFd, mapped to Invalid.
         let buf = [1u8, 2, 3];
-        assert_eq!(sys_write(0, &buf), Err(SyscallErr::Unimplemented));
+        assert_eq!(sys_write(0, &buf), Err(SyscallErr::Invalid));
     }
 
     #[test]
