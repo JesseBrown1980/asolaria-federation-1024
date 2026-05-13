@@ -27,7 +27,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-          toolchain: 1.75
+          toolchain: "1.81"
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
