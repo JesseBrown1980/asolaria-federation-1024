@@ -26,6 +26,40 @@
 //! | 800-895   | federation          | falcon              | nervous     |
 //! | 896-1023  | emergent_residual   | livefree            | memory      |
 
+/// One-past-end of the BEHCS-1024 codepoint range. Valid cps are `0..BEHCS_1024_CP_COUNT`.
+pub const BEHCS_1024_CP_COUNT: u16 = 1024;
+
+/// Inclusive max valid cp. Convenience alias = `BEHCS_1024_CP_COUNT - 1`.
+pub const BEHCS_1024_MAX_CP: u16 = BEHCS_1024_CP_COUNT - 1;
+
+/// One-past-end of the BEHCS-256 subset range. Cps `0..BEHCS_256_CP_COUNT` are the
+/// legacy-subset band that BEHCS-1024 must inherit semantics from per the
+/// subset-embedding invariant.
+pub const BEHCS_256_CP_COUNT: u16 = 256;
+
+/// Returns `true` iff `cp` is a valid BEHCS-1024 codepoint (i.e. `cp < 1024`).
+/// `const fn` — usable in syscall-tier no-alloc paths.
+pub const fn is_valid_cp(cp: u16) -> bool {
+    cp < BEHCS_1024_CP_COUNT
+}
+
+/// Map a BEHCS-1024 cp to its BEHCS-256 subset-embedding equivalent.
+///
+/// Per the subset-embedding invariant: cps 256-1023 inherit semantics from `cp mod 256`.
+/// Cps 0-255 are the identity. Out-of-range cps return `None`.
+///
+/// This is the load-bearing function for backward-compat: any BEHCS-256 consumer that
+/// receives a BEHCS-1024 cp should call this to obtain the legacy interpretation.
+/// `const fn` — usable in syscall-tier no-alloc paths.
+pub const fn subset_embedding_cp(cp: u16) -> Option<u8> {
+    if cp >= BEHCS_1024_CP_COUNT {
+        None
+    } else {
+        // cp < 1024, so cp % 256 ∈ 0..=255 fits in u8 losslessly.
+        Some((cp % BEHCS_256_CP_COUNT) as u8)
+    }
+}
+
 /// Atlas domain for a BEHCS-1024 codepoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AtlasDomain {
@@ -173,5 +207,92 @@ mod tests {
         // All three accessors must agree on out-of-range.
         assert_eq!(supervisor_for_cp(1024), None);
         assert_eq!(lane_for_cp(1024), None);
+    }
+
+    // ===== cp validity + subset-embedding tests =====
+
+    #[test]
+    fn behcs_1024_constants_are_canonical() {
+        assert_eq!(BEHCS_1024_CP_COUNT, 1024);
+        assert_eq!(BEHCS_1024_MAX_CP, 1023);
+        assert_eq!(BEHCS_256_CP_COUNT, 256);
+    }
+
+    #[test]
+    fn is_valid_cp_accepts_full_range() {
+        assert!(is_valid_cp(0));
+        assert!(is_valid_cp(1));
+        assert!(is_valid_cp(255));
+        assert!(is_valid_cp(256));
+        assert!(is_valid_cp(512));
+        assert!(is_valid_cp(1023));
+    }
+
+    #[test]
+    fn is_valid_cp_rejects_out_of_range() {
+        assert!(!is_valid_cp(1024));
+        assert!(!is_valid_cp(2048));
+        assert!(!is_valid_cp(u16::MAX));
+    }
+
+    #[test]
+    fn is_valid_cp_is_const() {
+        // Compile-time evaluation — assigning into a const proves const-fn-ness.
+        const VALID_ZERO: bool = is_valid_cp(0);
+        const VALID_MAX: bool = is_valid_cp(BEHCS_1024_MAX_CP);
+        const VALID_OOB: bool = is_valid_cp(BEHCS_1024_CP_COUNT);
+        assert!(VALID_ZERO);
+        assert!(VALID_MAX);
+        assert!(!VALID_OOB);
+    }
+
+    #[test]
+    fn subset_embedding_identity_on_legacy_band() {
+        // cps 0-255 are the identity.
+        assert_eq!(subset_embedding_cp(0), Some(0));
+        assert_eq!(subset_embedding_cp(1), Some(1));
+        assert_eq!(subset_embedding_cp(127), Some(127));
+        assert_eq!(subset_embedding_cp(255), Some(255));
+    }
+
+    #[test]
+    fn subset_embedding_inherits_from_cp_mod_256() {
+        // cps 256-1023 inherit semantics from cp mod 256.
+        assert_eq!(subset_embedding_cp(256), Some(0)); // cp 256 → BEHCS-256 0
+        assert_eq!(subset_embedding_cp(257), Some(1));
+        assert_eq!(subset_embedding_cp(383), Some(127));
+        assert_eq!(subset_embedding_cp(512), Some(0)); // cp 512 → BEHCS-256 0 (second cycle)
+        assert_eq!(subset_embedding_cp(768), Some(0)); // cp 768 → BEHCS-256 0 (third cycle)
+        assert_eq!(subset_embedding_cp(1023), Some(255));
+    }
+
+    #[test]
+    fn subset_embedding_rejects_out_of_range() {
+        assert_eq!(subset_embedding_cp(1024), None);
+        assert_eq!(subset_embedding_cp(u16::MAX), None);
+    }
+
+    #[test]
+    fn subset_embedding_invariant_holds_for_full_range() {
+        // Property: for any valid cp, subset_embedding_cp(cp).unwrap() == (cp % 256) as u8.
+        // This is the core invariant; this test runs the full 0..1024 range.
+        for cp in 0..BEHCS_1024_CP_COUNT {
+            assert_eq!(
+                subset_embedding_cp(cp),
+                Some((cp % BEHCS_256_CP_COUNT) as u8),
+                "subset embedding broken at cp {}",
+                cp
+            );
+        }
+    }
+
+    #[test]
+    fn subset_embedding_is_const() {
+        const E_ZERO: Option<u8> = subset_embedding_cp(0);
+        const E_FOUR_HUNDRED: Option<u8> = subset_embedding_cp(400);
+        const E_OOB: Option<u8> = subset_embedding_cp(1024);
+        assert_eq!(E_ZERO, Some(0));
+        assert_eq!(E_FOUR_HUNDRED, Some(144));
+        assert_eq!(E_OOB, None);
     }
 }

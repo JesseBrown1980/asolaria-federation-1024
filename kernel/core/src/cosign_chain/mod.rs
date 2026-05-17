@@ -14,10 +14,39 @@
 //! v0.1 scaffold: API surface + in-memory row storage. Real ndjson-writer + gc lands in Phase-3 wave.
 
 use crate::crypto::Signature;
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 use sha2::{Digest, Sha256};
+
+/// Compute canonical bytes for a `CosignRow`. Deterministic, includes every field that
+/// participates in chain integrity. Used by `append` to compute `head_sha16` and by
+/// `validate_end_to_end` to re-derive expected `prev_sha16` values.
+///
+/// Signature is intentionally OUT of canonical bytes — the sig is over THESE bytes,
+/// not the other way around.
+fn canonical_bytes_of_row(row: &CosignRow) -> String {
+    format!(
+        "row={}|ts={}|prev={}|kind={}|payload={}",
+        row.row, row.ts_ns, row.prev_sha16, row.kind, row.payload_sha16
+    )
+}
+
+/// Compute a 16-character lowercase-hex sha16 (first 8 bytes of sha256) of `bytes`.
+/// This is the wire form used by `prev_sha16` / `payload_sha16` / `head_sha16`.
+fn sha16_of(bytes: &[u8]) -> String {
+    let mut h = Sha256::new();
+    h.update(bytes);
+    let digest = h.finalize();
+    let mut s = String::with_capacity(16);
+    for byte in digest.iter().take(8) {
+        // Two hex chars per byte. char::from_digit returns Some for 0..=15.
+        s.push(char::from_digit((byte >> 4) as u32, 16).unwrap());
+        s.push(char::from_digit((byte & 0xf) as u32, 16).unwrap());
+    }
+    s
+}
 
 /// Genesis row identifier — `prev_sha16` of row 1.
 pub const GENESIS_PREV_SHA16: &str = "0000000000000000";
@@ -94,16 +123,70 @@ impl CosignChain {
         self.next_row
     }
 
-    /// Appends a row to the chain. Verifies monotonicity + sha-link + signature.
-    /// v0.1 stub: returns Unimplemented (sha-link and signature verification land in Phase-3 wave).
-    pub fn append(&mut self, _row: &CosignRow) -> Result<(), CosignChainErr> {
-        Err(CosignChainErr::Unimplemented)
+    /// Appends a row to the chain. Verifies monotonicity + sha-link + kind-non-empty.
+    ///
+    /// v0.2 (this method):
+    /// - `row.row` MUST equal `self.next_row` → else `NonMonotonicRow`
+    /// - `row.prev_sha16` MUST equal `self.head_sha16` → else `ChainLinkBroken`
+    /// - `row.kind` MUST be non-empty → else `KindMalformed`
+    /// - On success: clones the row into `self.rows`, advances `self.head_sha16` to the
+    ///   sha16 of the row's canonical bytes, bumps `self.next_row`.
+    ///
+    /// Signature verification is NOT enforced here yet — that requires real ed25519
+    /// public-key infrastructure plumbed via `crypto` module, landing in v0.3.
+    pub fn append(&mut self, row: &CosignRow) -> Result<(), CosignChainErr> {
+        if row.row != self.next_row {
+            return Err(CosignChainErr::NonMonotonicRow);
+        }
+        if row.prev_sha16 != self.head_sha16 {
+            return Err(CosignChainErr::ChainLinkBroken);
+        }
+        if row.kind.is_empty() {
+            return Err(CosignChainErr::KindMalformed);
+        }
+        let canon = canonical_bytes_of_row(row);
+        let new_head = sha16_of(canon.as_bytes());
+        self.rows.push(row.clone());
+        self.head_sha16 = new_head;
+        self.next_row += 1;
+        Ok(())
     }
 
     /// Validates the entire chain end-to-end.
-    /// v0.1 stub.
+    ///
+    /// v0.2: walks `self.rows` from the genesis prev_sha16, verifying that each row's
+    /// `row` index is the position-1 expected value, its `prev_sha16` matches the
+    /// re-derived sha16 of the previous row's canonical bytes, and its `kind` is
+    /// non-empty. Signature verification is skipped (v0.3 wires real ed25519).
+    ///
+    /// Returns `Ok(())` if the chain is internally consistent; otherwise the FIRST
+    /// integrity violation encountered. Useful for boot-time chain integrity checks
+    /// and for re-validating after loading rows from external storage.
     pub fn validate_end_to_end(&self) -> Result<(), CosignChainErr> {
-        Err(CosignChainErr::Unimplemented)
+        let mut expected_prev = String::from(GENESIS_PREV_SHA16);
+        for (i, row) in self.rows.iter().enumerate() {
+            let expected_row_num = (i as u64) + 1;
+            if row.row != expected_row_num {
+                return Err(CosignChainErr::NonMonotonicRow);
+            }
+            if row.prev_sha16 != expected_prev {
+                return Err(CosignChainErr::ChainLinkBroken);
+            }
+            if row.kind.is_empty() {
+                return Err(CosignChainErr::KindMalformed);
+            }
+            let canon = canonical_bytes_of_row(row);
+            expected_prev = sha16_of(canon.as_bytes());
+        }
+        Ok(())
+    }
+
+    /// Test-only escape hatch: push a row into the chain without integrity checks.
+    /// Used to construct deliberately-tampered chains for `validate_end_to_end` tests.
+    /// MUST NOT be called from non-test code.
+    #[cfg(test)]
+    pub fn push_unchecked_for_tests(&mut self, row: CosignRow) {
+        self.rows.push(row);
     }
 }
 
@@ -154,18 +237,165 @@ mod tests {
         assert!(GENESIS_PREV_SHA16.chars().all(|c| c == '0'));
     }
 
-    #[test]
-    fn append_stub_returns_unimplemented() {
-        let mut c = CosignChain::new();
-        let sig = Signature([0u8; 64]);
-        let row = CosignRow {
-            row: 1,
-            ts_ns: 0,
-            prev_sha16: String::from(GENESIS_PREV_SHA16),
+    fn sample_row(num: u64, prev: &str) -> CosignRow {
+        CosignRow {
+            row: num,
+            ts_ns: 1_000_000 + num,
+            prev_sha16: String::from(prev),
             kind: String::from("TEST"),
             payload_sha16: String::from("0000000000000000"),
-            sig,
-        };
-        assert_eq!(c.append(&row), Err(CosignChainErr::Unimplemented));
+            sig: Signature([0u8; 64]),
+        }
+    }
+
+    // ===== v0.2 chain integrity tests =====
+
+    #[test]
+    fn append_single_row_links_to_genesis_and_advances_head() {
+        let mut c = CosignChain::new();
+        let row = sample_row(1, GENESIS_PREV_SHA16);
+        assert_eq!(c.append(&row), Ok(()));
+        assert_eq!(c.depth(), 1);
+        assert_eq!(c.next_row(), 2);
+        assert_ne!(c.head(), GENESIS_PREV_SHA16);
+        assert_eq!(c.head().len(), 16);
+        assert!(c.head().chars().all(|ch| ch.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn append_chains_multiple_rows_with_sha_link() {
+        let mut c = CosignChain::new();
+        let r1 = sample_row(1, GENESIS_PREV_SHA16);
+        assert_eq!(c.append(&r1), Ok(()));
+        let head_after_1 = String::from(c.head());
+
+        let r2 = sample_row(2, &head_after_1);
+        assert_eq!(c.append(&r2), Ok(()));
+        let head_after_2 = String::from(c.head());
+        assert_ne!(head_after_2, head_after_1);
+
+        let r3 = sample_row(3, &head_after_2);
+        assert_eq!(c.append(&r3), Ok(()));
+
+        assert_eq!(c.depth(), 3);
+        assert_eq!(c.next_row(), 4);
+    }
+
+    #[test]
+    fn append_rejects_non_monotonic_row_number() {
+        let mut c = CosignChain::new();
+        let too_far = sample_row(2, GENESIS_PREV_SHA16);
+        assert_eq!(c.append(&too_far), Err(CosignChainErr::NonMonotonicRow));
+        let r1 = sample_row(1, GENESIS_PREV_SHA16);
+        assert_eq!(c.append(&r1), Ok(()));
+        // Re-appending row 1 (replay) must reject.
+        let head = String::from(c.head());
+        let replay = sample_row(1, &head);
+        assert_eq!(c.append(&replay), Err(CosignChainErr::NonMonotonicRow));
+    }
+
+    #[test]
+    fn append_rejects_broken_chain_link() {
+        let mut c = CosignChain::new();
+        let bad = sample_row(1, "deadbeefcafe1234");
+        assert_eq!(c.append(&bad), Err(CosignChainErr::ChainLinkBroken));
+    }
+
+    #[test]
+    fn append_rejects_empty_kind() {
+        let mut c = CosignChain::new();
+        let mut r = sample_row(1, GENESIS_PREV_SHA16);
+        r.kind = String::new();
+        assert_eq!(c.append(&r), Err(CosignChainErr::KindMalformed));
+    }
+
+    #[test]
+    fn validate_empty_chain_returns_ok() {
+        let c = CosignChain::new();
+        assert_eq!(c.validate_end_to_end(), Ok(()));
+    }
+
+    #[test]
+    fn validate_genuine_chain_returns_ok() {
+        let mut c = CosignChain::new();
+        let r1 = sample_row(1, GENESIS_PREV_SHA16);
+        c.append(&r1).unwrap();
+        let head1 = String::from(c.head());
+        let r2 = sample_row(2, &head1);
+        c.append(&r2).unwrap();
+        let head2 = String::from(c.head());
+        let r3 = sample_row(3, &head2);
+        c.append(&r3).unwrap();
+        assert_eq!(c.validate_end_to_end(), Ok(()));
+    }
+
+    #[test]
+    fn validate_detects_tampered_prev_sha16() {
+        let mut c = CosignChain::new();
+        // Build a valid 2-row chain.
+        let r1 = sample_row(1, GENESIS_PREV_SHA16);
+        c.append(&r1).unwrap();
+        let head1 = String::from(c.head());
+        let r2 = sample_row(2, &head1);
+        c.append(&r2).unwrap();
+        assert_eq!(c.validate_end_to_end(), Ok(()));
+
+        // Now construct a tampered chain via the test-only escape hatch.
+        let mut tampered = CosignChain::new();
+        tampered.push_unchecked_for_tests(r1.clone());
+        let mut bad_r2 = sample_row(2, "0123456789abcdef"); // wrong prev_sha16
+        bad_r2.row = 2;
+        tampered.push_unchecked_for_tests(bad_r2);
+        assert_eq!(
+            tampered.validate_end_to_end(),
+            Err(CosignChainErr::ChainLinkBroken)
+        );
+    }
+
+    #[test]
+    fn validate_detects_non_monotonic_row_number() {
+        let mut c = CosignChain::new();
+        // Insert row with index 5 first via unchecked push.
+        let mut r = sample_row(5, GENESIS_PREV_SHA16);
+        r.row = 5;
+        c.push_unchecked_for_tests(r);
+        assert_eq!(
+            c.validate_end_to_end(),
+            Err(CosignChainErr::NonMonotonicRow)
+        );
+    }
+
+    #[test]
+    fn validate_detects_empty_kind_row() {
+        let mut c = CosignChain::new();
+        let mut r = sample_row(1, GENESIS_PREV_SHA16);
+        r.kind = String::new();
+        c.push_unchecked_for_tests(r);
+        assert_eq!(c.validate_end_to_end(), Err(CosignChainErr::KindMalformed));
+    }
+
+    #[test]
+    fn canonical_bytes_are_deterministic() {
+        let r = sample_row(1, GENESIS_PREV_SHA16);
+        let b1 = canonical_bytes_of_row(&r);
+        let b2 = canonical_bytes_of_row(&r);
+        assert_eq!(b1, b2);
+        // Includes every chain-relevant field.
+        assert!(b1.contains("row=1"));
+        assert!(b1.contains("ts="));
+        assert!(b1.contains("prev=0000000000000000"));
+        assert!(b1.contains("kind=TEST"));
+        assert!(b1.contains("payload=0000000000000000"));
+    }
+
+    #[test]
+    fn sha16_of_is_16_hex_chars() {
+        let s = sha16_of(b"hello world");
+        assert_eq!(s.len(), 16);
+        assert!(s.chars().all(|c| c.is_ascii_hexdigit()));
+        // Deterministic.
+        assert_eq!(s, sha16_of(b"hello world"));
+        // Different input → different digest (with overwhelming probability).
+        assert_ne!(s, sha16_of(b"hello world!"));
     }
 }
