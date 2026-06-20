@@ -1,0 +1,22 @@
+[package]
+name = "asolaria-host8-serve"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+authors = ["Asolaria Federation"]
+description = "Asolaria Host8 userland serving binary · loopback HBP routes for room-stub parity"
+
+[[bin]]
+name = "host8-serve"
+path = "src/main.rs"
+
+[dependencies]
+asolaria-kernel-core = { path = "../../kernel/core" }
+asolaria-server-agent-runtime = { path = "../agent-runtime" }
+asolaria-server-cosign-ledger = { path = "../cosign-ledger" }
+asolaria-server-gnn-oracle = { path = "../gnn-oracle" }
+asolaria-server-highway = { path = "../highway" }
+asolaria-server-tier-policy = { path = "../tier-policy" }
+# sha2 · step-A /summon instance_pid must match node gaia-loader's sha256-first-16
+sha2 = { workspace = true }
