@@ -210,50 +210,7 @@ impl GnnInference {
     /// printable density, entropy-ish spread, and edge alternation directly from the
     /// envelope bytes. It is stable, no_std, HBP-friendly, and available before GPU.
     pub fn score_bytes(&self, bytes: &[u8]) -> Result<f32, GnnErr> {
-        if bytes.is_empty() {
-            return Ok(0.0);
-        }
-        let mut printable = 0u32;
-        let mut controls = 0u32;
-        let mut high = 0u32;
-        let mut transitions = 0u32;
-        let mut alternations = 0u32;
-        let mut prev = bytes[0];
-        let mut bins = [0u32; 16];
-        for (i, b) in bytes.iter().copied().enumerate() {
-            bins[(b & 0x0f) as usize] += 1;
-            if b == b'\n' || b == b'\r' || b == b'\t' || (0x20..=0x7e).contains(&b) {
-                printable += 1;
-            } else if b < 0x20 || b == 0x7f {
-                controls += 1;
-            } else {
-                high += 1;
-            }
-            if i > 0 {
-                if b != prev {
-                    transitions += 1;
-                }
-                if (b ^ prev) & 1 == 1 {
-                    alternations += 1;
-                }
-                prev = b;
-            }
-        }
-        let n = bytes.len() as f32;
-        let printable_ratio = printable as f32 / n;
-        let control_penalty = controls as f32 / n;
-        let high_ratio = high as f32 / n;
-        let transition_ratio = transitions as f32 / n.max(1.0);
-        let alternation_ratio = alternations as f32 / n.max(1.0);
-        let occupied = bins.iter().filter(|&&v| v > 0).count() as f32 / 16.0;
-        let score = 0.28 * printable_ratio
-            + 0.22 * transition_ratio
-            + 0.18 * alternation_ratio
-            + 0.18 * occupied
-            + 0.10 * high_ratio
-            + 0.04
-            - 0.35 * control_penalty;
-        Ok(score.clamp(0.0, 1.0))
+        Ok(score_bytes_pixels_first(bytes))
     }
 
     /// Routing oracle: predict best route for envelope using pixels-first byte score.
@@ -327,6 +284,130 @@ pub fn score_frame_q(frame: ObservedFrame) -> u32 {
         + pid_bits * 120 / 64
         + edge_mix * 150 / 64;
     raw.min(1000) as u32
+}
+
+/// Pixels-first byte/edge score in [0, 1] — pure, no_std, the reusable core of
+/// `GnnInference::score_bytes`. Measures printable density, byte transitions, low-bit
+/// alternation, nibble occupancy, and high-byte ratio directly from the bytes (not a hash
+/// repeat, not GPU). Empty input scores 0.
+pub fn score_bytes_pixels_first(bytes: &[u8]) -> f32 {
+    if bytes.is_empty() {
+        return 0.0;
+    }
+    let mut printable = 0u32;
+    let mut controls = 0u32;
+    let mut high = 0u32;
+    let mut transitions = 0u32;
+    let mut alternations = 0u32;
+    let mut prev = bytes[0];
+    let mut bins = [0u32; 16];
+    for (i, b) in bytes.iter().copied().enumerate() {
+        bins[(b & 0x0f) as usize] += 1;
+        if b == b'\n' || b == b'\r' || b == b'\t' || (0x20..=0x7e).contains(&b) {
+            printable += 1;
+        } else if b < 0x20 || b == 0x7f {
+            controls += 1;
+        } else {
+            high += 1;
+        }
+        if i > 0 {
+            if b != prev {
+                transitions += 1;
+            }
+            if (b ^ prev) & 1 == 1 {
+                alternations += 1;
+            }
+            prev = b;
+        }
+    }
+    let n = bytes.len() as f32;
+    let printable_ratio = printable as f32 / n;
+    let control_penalty = controls as f32 / n;
+    let high_ratio = high as f32 / n;
+    let transition_ratio = transitions as f32 / n.max(1.0);
+    let alternation_ratio = alternations as f32 / n.max(1.0);
+    let occupied = bins.iter().filter(|&&v| v > 0).count() as f32 / 16.0;
+    let score = 0.28 * printable_ratio
+        + 0.22 * transition_ratio
+        + 0.18 * alternation_ratio
+        + 0.18 * occupied
+        + 0.10 * high_ratio
+        + 0.04
+        - 0.35 * control_penalty;
+    score.clamp(0.0, 1.0)
+}
+
+// ===== STEP 3 — white-room Scorer + Omniflywheel verdict-aggregator =====
+//
+// The asolaria-whiteroom-engine SCORER leg, ported as a Rust trait: per mark, score in [0,1],
+// KEEP genius (>= threshold) / COMPACT mistake (below — retained as cold provenance, NEVER
+// deleted). The Omniflywheel (prof / verdict-aggregator, AgentRole::Omniflywheel) promotes a
+// finding ONLY when its forward score clears the genius bar AND its reverse-gain risk is bounded
+// — the loop's many-rooms -> reverse-gain GNN -> 1-answer fold. All PURE / E=0: scoring and
+// classification only; no store, no I/O, no dispatch.
+
+/// White-room genius threshold — KEEP at/above, COMPACT below (asolaria-whiteroom-engine canon).
+pub const WHITEROOM_GENIUS_THRESHOLD: f32 = 0.72;
+
+/// Omniflywheel maximum reverse-gain risk permitted for promotion.
+pub const OMNIFLYWHEEL_MAX_REVERSE_RISK: f32 = 0.28;
+
+/// Pluggable white-room scorer. Implementors map a mark's bytes to a score in [0, 1]. PURE:
+/// a scorer has no store and performs no I/O (the white-room STORE is a separate concern).
+pub trait Scorer {
+    /// Score a mark's bytes in [0, 1].
+    fn score(&self, mark: &[u8]) -> f32;
+}
+
+/// Pixels-first byte/edge scorer — the live hot-path scorer (no GPU, no hash repeat).
+pub struct PixelsFirstScorer;
+impl Scorer for PixelsFirstScorer {
+    fn score(&self, mark: &[u8]) -> f32 {
+        score_bytes_pixels_first(mark)
+    }
+}
+
+/// Deterministic fallback scorer — stable, bounded, content-derived. For testable pipelines
+/// at $0 (mirrors the node loop's deterministic-mock lane). NOT a quality signal — a placeholder
+/// when the pixels-first/learned scorer is unavailable.
+pub struct DeterministicScorer;
+impl Scorer for DeterministicScorer {
+    fn score(&self, mark: &[u8]) -> f32 {
+        if mark.is_empty() {
+            return 0.0;
+        }
+        let sum: u32 = mark.iter().map(|&b| b as u32).sum();
+        (sum % 1000) as f32 / 1000.0
+    }
+}
+
+/// White-room verdict for a scored mark. NEVER `Delete` — a mistake is COMPACTED (kept as cold
+/// provenance), matching the white-room append-only / compact-not-delete doctrine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WhiteRoomVerdict {
+    /// score >= genius threshold — KEEP as genius (farm the gem).
+    FarmGenius,
+    /// below threshold — COMPACT as mistake (retained, never deleted).
+    CompactMistake,
+}
+
+/// Classify a mark via a scorer into a white-room verdict. Returns `(score, verdict)`.
+pub fn whiteroom_verdict<S: Scorer>(scorer: &S, mark: &[u8]) -> (f32, WhiteRoomVerdict) {
+    let s = scorer.score(mark);
+    let v = if s >= WHITEROOM_GENIUS_THRESHOLD {
+        WhiteRoomVerdict::FarmGenius
+    } else {
+        WhiteRoomVerdict::CompactMistake
+    };
+    (s, v)
+}
+
+/// Omniflywheel promotion gate (prof / verdict-aggregator): promote a finding ONLY if its forward
+/// score clears the genius threshold AND its reverse-gain risk is within bound. This is the
+/// reverse-gain check the loop applies after the forward prism fold — a high forward score is
+/// necessary but NOT sufficient; the reverse risk must also be low.
+pub fn omniflywheel_promote(score: f32, reverse_risk: f32) -> bool {
+    score >= WHITEROOM_GENIUS_THRESHOLD && reverse_risk <= OMNIFLYWHEEL_MAX_REVERSE_RISK
 }
 
 #[cfg(test)]
@@ -436,5 +517,63 @@ mod tests {
         let plain = g.score_bytes(b"HBPv1|row=edge|payload=abcd1234|json=0").unwrap();
         let controls = g.score_bytes(&[0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         assert!(plain > controls);
+    }
+
+    // --- STEP 3 white-room scorer + Omniflywheel aggregator ---
+
+    struct FixedScorer(f32);
+    impl Scorer for FixedScorer {
+        fn score(&self, _mark: &[u8]) -> f32 {
+            self.0
+        }
+    }
+
+    #[test]
+    fn whiteroom_verdict_keeps_genius_compacts_mistake() {
+        assert_eq!(
+            whiteroom_verdict(&FixedScorer(0.80), b"x").1,
+            WhiteRoomVerdict::FarmGenius
+        );
+        assert_eq!(
+            whiteroom_verdict(&FixedScorer(0.50), b"x").1,
+            WhiteRoomVerdict::CompactMistake
+        );
+        // exactly at the threshold counts as genius (>=).
+        assert_eq!(
+            whiteroom_verdict(&FixedScorer(WHITEROOM_GENIUS_THRESHOLD), b"x").1,
+            WhiteRoomVerdict::FarmGenius
+        );
+        // the score is passed through unchanged.
+        assert_eq!(whiteroom_verdict(&FixedScorer(0.80), b"x").0, 0.80);
+    }
+
+    #[test]
+    fn omniflywheel_promote_needs_high_score_and_low_reverse_risk() {
+        assert!(omniflywheel_promote(0.80, 0.10), "high score + low risk promotes");
+        assert!(!omniflywheel_promote(0.80, 0.40), "high reverse risk blocks promotion");
+        assert!(!omniflywheel_promote(0.60, 0.10), "low score blocks promotion");
+        // exactly at both bounds promotes (>= score, <= risk).
+        assert!(omniflywheel_promote(
+            WHITEROOM_GENIUS_THRESHOLD,
+            OMNIFLYWHEEL_MAX_REVERSE_RISK
+        ));
+    }
+
+    #[test]
+    fn pixels_first_scorer_matches_gnn_score_bytes() {
+        let s = PixelsFirstScorer;
+        let g = GnnInference::new();
+        let mark = b"HBPv1|row=edge|payload=abcd1234|json=0";
+        assert_eq!(s.score(mark), g.score_bytes(mark).unwrap());
+        assert_eq!(s.score(b""), 0.0);
+    }
+
+    #[test]
+    fn deterministic_scorer_is_stable_and_bounded() {
+        let s = DeterministicScorer;
+        let a = s.score(b"hello world");
+        assert_eq!(a, s.score(b"hello world"), "deterministic");
+        assert!((0.0..=1.0).contains(&a), "bounded to [0,1]");
+        assert_eq!(s.score(b""), 0.0);
     }
 }
