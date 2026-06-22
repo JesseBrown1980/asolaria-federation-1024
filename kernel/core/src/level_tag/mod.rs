@@ -19,20 +19,59 @@ pub const LEVEL_FEDERATION: u8 = 5;
 pub const LEVEL_OWNER_PRIVATE: u8 = 9;
 
 /// Path fragments that mark a row owner-private (PII / secrets), matched case-insensitively.
+/// Comprehensive by necessity: when row bodies are path-derived metadata (no full text), the
+/// content rules below rarely fire, so classification reduces to these path fragments. Narrow
+/// "/x/" forms are de-slashed so they also catch the bare dir + filename forms (e.g. "legal"
+/// catches "legal-recovery"/"Legal Analysis...docx"; ".asolaria" catches the bare secrets dir;
+/// "dcim" catches "dcim.json"). Conservative: a false positive only over-privatizes (safe).
 const PII_PATH_FRAGMENTS: &[&str] = &[
-    "legal/",
+    // legal / financial / customer / personal docs
+    "legal",
     "evidence-package",
+    "evidence",
     "google-support-refund",
     "support-refund-complaints",
     "refund-complaint",
-    "/dcim/",
+    "refund",
+    "bank",
+    "invoice",
+    "financial",
+    "paypal",
+    "zelle",
+    "passport",
+    "cnpj",
+    "cpf",
+    "whatsapp-rayssa",
+    // secrets / keys / vault / credentials
     "beast-keys",
+    "backup-keys",
     "decrypted-vault",
+    "vault",
     "charm_",
     "private-key",
+    "privatekey",
     "recall.key",
-    ".asolaria/",
+    ".pem",
+    ".key",
+    ".pk8",
+    ".kdbx",
+    ".keystore",
+    ".jks",
+    "id_rsa",
+    "id_ed25519",
+    "wallet.dat",
+    "seed-phrase",
+    "seed_phrase",
+    "mnemonic",
     "credential",
+    "secret",
+    "password",
+    "passwd",
+    ".asolaria",
+    // personal-device dumps (phone DCIM / sdcard / downloads)
+    "dcim",
+    "sdcard",
+    "falcon-dump",
     "phone-dump",
 ];
 
@@ -158,7 +197,7 @@ mod tests {
     fn cnpj_content_is_owner_private_even_on_a_neutral_path() {
         // A 14-digit CNPJ in the body → private regardless of path.
         assert_eq!(
-            assign_level("C:/x/reports/qdd.md", "order for CNPJ 40461953000171 placed"),
+            assign_level("C:/x/reports/qdd.md", "order for CNPJ 11222333000181 placed"),
             LEVEL_OWNER_PRIVATE
         );
         assert_eq!(assign_level("C:/x/notes.md", "paypal payment to ..."), LEVEL_OWNER_PRIVATE);
@@ -191,7 +230,7 @@ mod tests {
     fn helpers_behave() {
         assert!(contains_ci("Legal/Evidence-Package", "evidence-package"));
         assert!(!contains_ci("clean/path", "evidence-package"));
-        assert!(has_digit_run("abc 40461953000171 def", 14));
+        assert!(has_digit_run("abc 11222333000181 def", 14));
         assert!(!has_digit_run("only 1234567 here", 14));
     }
 
@@ -206,6 +245,32 @@ mod tests {
         ];
         for (p, c) in pii_rows {
             assert_ne!(assign_level(p, c), LEVEL_PUBLIC, "PII row leaked to public: {p}");
+        }
+    }
+
+    #[test]
+    fn coverage_gap_findings_2026_06_22_are_owner_private() {
+        // Paths the adversarial audit (workflow wkrt8surs over acer's real 591,286-row index) found
+        // leaking to FEDERATION(5) — and one to PUBLIC(0) — instead of owner-private. Pinned to 9.
+        let must_be_private = [
+            "C:/asolaria-acer/packages/immune-l1-supervisor/keys/supervisor.ed25519.pem",
+            "C:/Users/acer/Asolaria/data/vault.master.key",
+            "C:/Users/acer/Asolaria/data/vault/owner/crypto-capsule/ed25519.key.pem",
+            "C:/Users/acer/Asolaria/sovereignty/data/falcon-dump/sdcard/Download/April bank statement.PDF",
+            "C:/Users/acer/Asolaria/data/s22-legal-recovery/packet.txt",
+            "C:/Users/acer/Asolaria/tools/google-password-candidates.py",
+            "D:/Asolaria-RECOVERED/Asolaria/bank-account-transcrtions/README.md", // was PUBLIC(0) via 'readme'
+            "C:/Users/acer/.asolaria",                                            // bare secrets dir (was FED)
+            "C:/x/s22-mounted-access/dcim.json",                                  // bare dcim filename (was FED)
+            "C:/asolaria-acer/packages/dashboard/.../pdf-claude-secret-settings.txt",
+        ];
+        for p in must_be_private {
+            assert_eq!(assign_level(p, ""), LEVEL_OWNER_PRIVATE, "still leaking (not owner-private): {p}");
+        }
+        // And the public-canon docs must STILL be public (the expansion must not over-privatize them).
+        for p in ["C:/asolaria-acer/README.md", "C:/Users/acer/Asolaria/BROWN-HILBERT.md",
+                  "reports/asolaria-multi-cylinder-v2.html", "docs/what-is-asolaria.md"] {
+            assert_eq!(assign_level(p, "clean canon body"), LEVEL_PUBLIC, "canon wrongly privatized: {p}");
         }
     }
 }
