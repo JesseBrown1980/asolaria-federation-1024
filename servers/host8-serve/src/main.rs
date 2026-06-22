@@ -801,6 +801,7 @@ fn render_feed(
         "HOST8ROUTE|path=/summon.hbp?h=<handle8>&device=<d>&ts=<unix>&fire=<0|1>|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/v1/envelope.hbp?caller=&target=&verb=&payload=&cube=&glyph=&cosign=&ttl=&ant=&row=[&ts=]|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/launch-plan.hbp?h=<handle8>&device=<d>&ts=<unix>&role=<hermes|sub>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
+        "HOST8ROUTE|path=/summon-batch.hbp?count=<N>&role=<hermes|sub>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
     ]
     .join("\n")
         + "\n"
@@ -1217,6 +1218,58 @@ fn render_launch_plan(book: &SeatBook, _config: &Config, gnn_score_q: u32, query
     (true, body)
 }
 
+/// `/summon-batch.hbp?count=N&role=&score=&risk=` — #24 fan-out: plan a launch for the FIRST N seats
+/// (capped at 1000/request), each routed C/D room -> runner -> spawn-gate, DRY. The operator's
+/// "10k and 10k prisms" expressed as a batch PLAN, not a launcher: `process_launch=0` ALWAYS, zero
+/// spawns. Emits a HOST8BATCH summary (per-verdict + per-substrate tallies) then one HOST8LAUNCHPLAN
+/// line per seat. Reuses `render_launch_plan` per seat (its core is the single-summon contract).
+fn render_summon_batch(book: &SeatBook, config: &Config, gnn_score_q: u32, query: &str) -> String {
+    const MAX_BATCH: usize = 1000;
+    let requested = query_param(query, "count")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(1);
+    let role = query_param(query, "role").unwrap_or_default();
+    let score = query_param(query, "score").unwrap_or_default();
+    let risk = query_param(query, "risk").unwrap_or_default();
+    let n = requested.min(MAX_BATCH).min(book.seats.len());
+
+    let mut lines = String::new();
+    let (mut proceed, mut hold, mut block, mut c_rooms, mut d_rooms) = (0usize, 0usize, 0usize, 0usize, 0usize);
+    for seat in book.seats.iter().take(n) {
+        let sub_query = format!(
+            "h={}&role={}&score={}&risk={}",
+            seat.handle8, role, score, risk
+        );
+        let (_ok, line) = render_launch_plan(book, config, gnn_score_q, &sub_query);
+        match hbp_field(&line, "gate_verdict").as_deref() {
+            Some("PROCEED") => proceed += 1,
+            Some("HOLD") => hold += 1,
+            _ => block += 1,
+        }
+        match hbp_field(&line, "substrate").as_deref() {
+            Some("C") => c_rooms += 1,
+            Some("D") => d_rooms += 1,
+            _ => {}
+        }
+        lines.push_str(&line);
+    }
+
+    let mut out = format!(
+        "HOST8BATCH|requested={}|planned={}|seats_available={}|cap={}|proceed={}|hold={}|block={}|c_rooms={}|d_rooms={}|process_launch=0|json=0\n",
+        requested,
+        n,
+        book.seats.len(),
+        MAX_BATCH,
+        proceed,
+        hold,
+        block,
+        c_rooms,
+        d_rooms
+    );
+    out.push_str(&lines);
+    out
+}
+
 fn handle_client(
     mut stream: TcpStream,
     room: &Room,
@@ -1254,6 +1307,10 @@ fn handle_client(
             let gnn_score_q = gnn.preview_latest_score_q().unwrap_or(0);
             let (ok, body) = render_launch_plan(book, config, gnn_score_q, query);
             (if ok { "200 OK" } else { "404 Not Found" }, body)
+        }
+        "/summon-batch.hbp" => {
+            let gnn_score_q = gnn.preview_latest_score_q().unwrap_or(0);
+            ("200 OK", render_summon_batch(book, config, gnn_score_q, query))
         }
         "/seat.hbp" => {
             let handle = query_param(query, "h").unwrap_or_default();
@@ -1617,5 +1674,36 @@ mod tests {
         let (ok, body) = render_launch_plan(&book, &config, 800, "h=deadbeefdeadbeef&device=acer");
         assert!(!ok);
         assert!(body.contains("HOST8ERR|status=404"));
+    }
+
+    #[test]
+    fn summon_batch_plans_n_dry_with_tallies() {
+        let (mut book, config) = launch_plan_test_fixture();
+        // add a second seat so the batch plans 2.
+        book.seats.push(Seat {
+            name: "AGT-C4".to_string(),
+            handle8: "f679158eb8ca4531".to_string(),
+            cube_bh: "BH.4.0.100".to_string(),
+            hilbert: "930".to_string(),
+            class: "hyperbehcs_supervisor_entity".to_string(),
+            layer: "supervisor".to_string(),
+            source: "test".to_string(),
+        });
+        // genius score => both PROCEED; both agent rooms route to C:. DRY: process_launch=0, zero spawns.
+        let out = render_summon_batch(&book, &config, 0, "count=5&score=800&risk=10");
+        assert!(out.contains("HOST8BATCH|requested=5|planned=2|")); // only 2 seats available
+        assert!(out.contains("proceed=2"));
+        assert!(out.contains("c_rooms=2"));
+        assert!(out.contains("process_launch=0"));
+        assert_eq!(out.matches("HOST8LAUNCHPLAN|").count(), 2); // one plan line per planned seat
+        assert!(out.contains("json=0"));
+        assert!(!out.contains('{'));
+        assert!(!out.contains('}'));
+
+        // no score => both HOLD (gate not genius-cleared); still zero launches.
+        let held = render_summon_batch(&book, &config, 0, "count=2");
+        assert!(held.contains("hold=2"));
+        assert!(held.contains("proceed=0"));
+        assert!(held.contains("process_launch=0"));
     }
 }
