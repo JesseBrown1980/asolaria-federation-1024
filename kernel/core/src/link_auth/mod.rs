@@ -152,6 +152,48 @@ pub fn verify_link(
     }
 }
 
+/// A per-owner access GRANT: which owner-PID may link, and the MAXIMUM fabric access LEVEL the
+/// owner permits them. This is how an owner "shares different levels of their fabric to other
+/// fabrics" (operator model): level 0 = public / carve-out-clean canon (shareable to ANY fabric —
+/// the public "search engine for agents"); higher levels expose more; the TOP level holds owner-only
+/// PII (legal / financial / personal) and is granted ONLY to the owner's own trusted links (e.g.
+/// acer <-> liris). The crypto key + owner-PID gate — not obscurity — keeps each level private
+/// between fabrics, which is what makes "PII protected by crypto hash keys between fabrics" true.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LinkGrant<'a> {
+    /// Owner-human PID this grant is for (e.g. "OP-RAYSSA"). The owner of 10B human PIDs assigns these.
+    pub owner_pid: &'a str,
+    /// Maximum access level this host permits that owner (0 = public-clean only).
+    pub max_level: u8,
+}
+
+/// Public access level — carve-out-clean canon, shareable to any fabric (the public tier).
+pub const LEVEL_PUBLIC: u8 = 0;
+
+/// The maximum access level this host grants `owner_pid`, or `None` if the owner has no grant at
+/// all. An ungranted owner gets NOTHING over the gated link (not even level 0); a public portal
+/// must serve level 0 from a SEPARATE, corpus-scrubbed read path — never this gated one.
+pub fn granted_level(owner_pid: &str, grants: &[LinkGrant<'_>]) -> Option<u8> {
+    let mut best: Option<u8> = None;
+    for g in grants {
+        if g.owner_pid == owner_pid {
+            best = Some(match best {
+                Some(b) if b >= g.max_level => b,
+                _ => g.max_level,
+            });
+        }
+    }
+    best
+}
+
+/// Effective rows-visibility ceiling for a request: `min(requested_level, granted)`, or `None` if
+/// the owner has no grant. The serve layer filters index rows to those tagged `level <= this` — so
+/// a third-party owner granted only level 0 sees public rows even if they ask for level 9, and the
+/// owner's own trusted link sees PII only up to the level the owner actually granted.
+pub fn effective_level(owner_pid: &str, requested_level: u8, grants: &[LinkGrant<'_>]) -> Option<u8> {
+    granted_level(owner_pid, grants).map(|g| if requested_level < g { requested_level } else { g })
+}
+
 /// Constant-time-ish compare of a 32-byte MAC to a 64-char lowercase-hex string (no early-out).
 fn hmac_hex_matches(mac: &[u8; 32], expected_hex: &str) -> bool {
     if expected_hex.len() != 64 {
@@ -296,5 +338,25 @@ mod tests {
             hmac_hex: "tooshort",
         };
         assert_eq!(verify_link(&req, KEY, GRANTS, 1005, 120), LinkVerdict::DenyMalformed);
+    }
+
+    #[test]
+    fn access_levels_share_different_tiers_per_owner() {
+        // The operator's "share different levels of their fabric to other fabrics": the owner's own
+        // trusted link gets the top level (incl PII); a third-party guest gets public-clean only.
+        let grants = &[
+            LinkGrant { owner_pid: "OP-RAYSSA", max_level: 9 },          // trusted link -> full incl PII
+            LinkGrant { owner_pid: "OP-GUEST", max_level: LEVEL_PUBLIC }, // third party -> public only
+        ];
+        assert_eq!(granted_level("OP-RAYSSA", grants), Some(9));
+        assert_eq!(granted_level("OP-GUEST", grants), Some(LEVEL_PUBLIC));
+        assert_eq!(granted_level("OP-STRANGER", grants), None); // ungranted -> nothing
+        // a third-party guest asking for a high level is clamped to public:
+        assert_eq!(effective_level("OP-GUEST", 9, grants), Some(LEVEL_PUBLIC));
+        // the trusted link gets up to its ceiling, never above:
+        assert_eq!(effective_level("OP-RAYSSA", 5, grants), Some(5));
+        assert_eq!(effective_level("OP-RAYSSA", 99, grants), Some(9));
+        // an ungranted owner gets nothing over the gated link — not even public:
+        assert_eq!(effective_level("OP-STRANGER", 0, grants), None);
     }
 }
