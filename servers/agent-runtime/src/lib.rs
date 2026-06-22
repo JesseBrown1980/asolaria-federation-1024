@@ -168,8 +168,20 @@ pub enum VantageId {
     Aether,
 }
 
-/// Canonical max concurrent agents per spec (Step 118 benchmark target).
+/// Canonical max concurrent agents per spec (Step 118 benchmark target). This is the PER-SUBSTRATE
+/// cap (one registry per substrate); see `AGENT_REGISTRY_MAX_TOTAL` for the fleet total.
 pub const AGENT_REGISTRY_MAX: usize = 10_000;
+
+/// Substrates the agent fleet spreads across (C: + D:). The operator's "10k and 10k on C and D".
+pub const SUBSTRATE_COUNT: usize = 2;
+
+/// Per-substrate registry capacity — one `AgentRegistry` per substrate, each capped at
+/// `AGENT_REGISTRY_MAX`, so neither C nor D starves the other (matches `rooms::ROOM_COUNT` = 10k).
+pub const AGENT_REGISTRY_MAX_PER_SUBSTRATE: usize = AGENT_REGISTRY_MAX;
+
+/// Total fleet capacity across both substrates — 10k on C + 10k on D = 20k (the operator's target).
+/// host8 holds one registry per substrate and routes by `rooms::Substrate`; the total is the sum.
+pub const AGENT_REGISTRY_MAX_TOTAL: usize = AGENT_REGISTRY_MAX_PER_SUBSTRATE * SUBSTRATE_COUNT;
 
 /// Heartbeat timeout — beyond this, supervisor marks `Failed`.
 pub const HEARTBEAT_TIMEOUT_NS: u64 = 60 * 1_000_000_000; // 60 seconds
@@ -477,6 +489,13 @@ mod tests {
     #[test]
     fn registry_max_is_10k() {
         assert_eq!(AGENT_REGISTRY_MAX, 10_000);
+    }
+
+    #[test]
+    fn fleet_capacity_is_10k_per_substrate_20k_total() {
+        assert_eq!(SUBSTRATE_COUNT, 2);
+        assert_eq!(AGENT_REGISTRY_MAX_PER_SUBSTRATE, 10_000);
+        assert_eq!(AGENT_REGISTRY_MAX_TOTAL, 20_000, "10k on C + 10k on D");
     }
 
     #[test]
