@@ -8,8 +8,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
 
+use asolaria_kernel_core::envelope::fedenv::{self, FedenvView};
 use asolaria_kernel_core::{FEDERATION_ANCHOR_PID, KERNEL_VERSION};
-use asolaria_server_agent_runtime::spawn_child_agent_count;
+use asolaria_server_agent_runtime::{spawn_child_agent_count, AgentRegistry};
 use asolaria_server_cosign_ledger::CosignChain;
 use asolaria_server_gnn_oracle::{GnnInference, ObservedFrame};
 use asolaria_server_highway::check_transit;
@@ -106,8 +107,11 @@ fn main() {
 
     let started = Instant::now();
     let mut gnn = GnnInference::new();
+    // Long-lived agent registry — the 8-byte/PID handle table BEHIND the route layer. Owns the
+    // separate per-layer DispatchCounters surfaced in HOST8LIBS. E=0: registration/counting only.
+    let mut registry = AgentRegistry::new();
     if config.once {
-        print!("{}", render_feed(&room, &config, &book, started, &mut gnn));
+        print!("{}", render_feed(&room, &config, &book, started, &mut gnn, &registry));
         return;
     }
 
@@ -139,7 +143,9 @@ fn main() {
 
     for stream in listener.incoming() {
         match stream {
-            Ok(stream) => handle_client(stream, &room, &config, &book, started, &mut gnn),
+            Ok(stream) => {
+                handle_client(stream, &room, &config, &book, started, &mut gnn, &mut registry)
+            }
             Err(error) => eprintln!("HOST8ERR|accept={}|json=0", hbp_escape(error.to_string())),
         }
     }
@@ -689,8 +695,10 @@ fn render_feed(
     book: &SeatBook,
     started: Instant,
     gnn: &mut GnnInference,
+    registry: &AgentRegistry,
 ) -> String {
     let chain = CosignChain::new();
+    let counters = registry.counters();
     // pixels-before-GPU: readiness binds a fresh cadence frame, not a loaded model.
     let gnn_frame_source = config.cadence_frame_path.as_deref().unwrap_or("-");
     let gnn_frame_ingested = config
@@ -736,8 +744,14 @@ fn render_feed(
             hbp_escape(room_stub_source)
         ),
         format!(
-            "HOST8LIBS|agent_runtime_spawn_count={}|cosign_head={}|gnn_ready={}|gnn_engine={}|gnn_model_sha16={}|gnn_frame_source={}|gnn_frame_ingested={}|gnn_frame_tick={}|gnn_score_q={}|public_policy={:?}|public_to_secret_authorized={}|json=0",
+            "HOST8LIBS|sys_fork_spawn_count={}|virtual_registered={}|omnidispatch_routed={}|receipt_gated_helper={}|opencode_free_agent_call={}|os_process_spawn={}|ambiguous_held={}|cosign_head={}|gnn_ready={}|gnn_engine={}|gnn_model_sha16={}|gnn_frame_source={}|gnn_frame_ingested={}|gnn_frame_tick={}|gnn_score_q={}|public_policy={:?}|public_to_secret_authorized={}|json=0",
             spawn_child_agent_count(),
+            counters.virtual_registered,
+            counters.omnidispatch_routed,
+            counters.receipt_gated_helper,
+            counters.opencode_free_agent_call,
+            counters.os_process_spawn,
+            counters.ambiguous_held,
             hbp_escape(chain.head()),
             if gnn_ready { 1 } else { 0 },
             hbp_escape(gnn_engine),
@@ -775,6 +789,7 @@ fn render_feed(
         "HOST8ROUTE|path=/seat/<handle8>.hbp|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/count.hbp|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/summon.hbp?h=<handle8>&device=<d>&ts=<unix>&fire=<0|1>|method=GET|format=HBP|json=0".to_string(),
+        "HOST8ROUTE|path=/v1/envelope.hbp?caller=&target=&verb=&payload=&cube=&glyph=&cosign=&ttl=&ant=&row=[&ts=]|method=GET|format=HBP|json=0".to_string(),
     ]
     .join("\n")
         + "\n"
@@ -1007,6 +1022,60 @@ fn query_param(query: &str, key: &str) -> Option<String> {
     None
 }
 
+/// `/v1/envelope.hbp?caller=&target=&verb=&payload=&cube=&glyph=&cosign=&ttl=&ant=&row=[&ts=]`
+/// — validate a FEDENV-v1 envelope (PURE / E=0) via the kernel `fedenv` module and classify its
+/// route. ACCEPT records ONE omnidispatch route (a DESCRIPTOR count — NO dispatch, NO process
+/// launch; `os_process_spawn` stays 0, gated); REJECT carries the exact `EVT-FEDENV-REJECTED-*`
+/// reason. The downstream launch is never reached here. `tools/omnidispatcher` is the parity oracle.
+fn render_envelope(query: &str, registry: &mut AgentRegistry) -> String {
+    let caller = query_param(query, "caller").unwrap_or_default();
+    let target = query_param(query, "target").unwrap_or_default();
+    let verb = query_param(query, "verb").unwrap_or_default();
+    let payload = query_param(query, "payload").unwrap_or_default();
+    let cube = query_param(query, "cube").unwrap_or_default();
+    let glyph = query_param(query, "glyph").unwrap_or_default();
+    let cosign = query_param(query, "cosign").unwrap_or_default();
+    let ttl = query_param(query, "ttl").unwrap_or_default();
+    let ant = query_param(query, "ant").unwrap_or_default();
+    let row = query_param(query, "row").unwrap_or_default();
+    let back = query_param(query, "back").unwrap_or_else(|| String::from("pid:H0000"));
+    let priority = query_param(query, "priority").unwrap_or_default();
+    let ts = query_param(query, "ts");
+    let view = FedenvView {
+        caller_pid: caller.as_str(),
+        target: target.as_str(),
+        verb: verb.as_str(),
+        payload: payload.as_str(),
+        back_address: back.as_str(),
+        cube_47d: cube.as_str(),
+        glyph_5: glyph.as_str(),
+        cosign_token: cosign.as_str(),
+        ttl_seconds: ttl.as_str(),
+        antecedents: ant.as_str(),
+        row_hash: row.as_str(),
+        ts: ts.as_deref(),
+    };
+    match fedenv::validate(&view) {
+        Ok(()) => {
+            // ACCEPT: record exactly ONE omnidispatch route — a DESCRIPTOR count, NOT a dispatch.
+            // No process is launched; os_process_spawn stays 0 (the launch lane is host8-gated).
+            registry.note_omnidispatch_routed();
+            let route = fedenv::resolve_target(target.as_str());
+            let prio = fedenv::priority_of(priority.as_str());
+            format!(
+                "HOST8ENVELOPE|verdict=ACCEPT|route={:?}|priority={:?}|omnidispatch_routed={}|process_launch=0|json=0",
+                route,
+                prio,
+                registry.counters().omnidispatch_routed
+            )
+        }
+        Err(reason) => format!(
+            "HOST8ENVELOPE|verdict=REJECT|reason={}|process_launch=0|json=0",
+            hbp_escape(reason.as_event_str())
+        ),
+    }
+}
+
 fn handle_client(
     mut stream: TcpStream,
     room: &Room,
@@ -1014,6 +1083,7 @@ fn handle_client(
     book: &SeatBook,
     started: Instant,
     gnn: &mut GnnInference,
+    registry: &mut AgentRegistry,
 ) {
     let mut buffer = [0u8; 2048];
     let read = match stream.read(&mut buffer) {
@@ -1029,7 +1099,7 @@ fn handle_client(
     };
     let (status, body) = match path {
         "/" | "/health.hbp" | "/room.hbp" | "/feed.hbp" => {
-            ("200 OK", render_feed(room, config, book, started, gnn))
+            ("200 OK", render_feed(room, config, book, started, gnn, registry))
         }
         "/seats.hbp" => ("200 OK", render_seats(book)),
         "/count.hbp" => ("200 OK", render_count(book)),
@@ -1037,6 +1107,7 @@ fn handle_client(
             let (ok, body) = render_summon(book, config, query);
             (if ok { "200 OK" } else { "404 Not Found" }, body)
         }
+        "/v1/envelope.hbp" => ("200 OK", render_envelope(query, registry)),
         "/seat.hbp" => {
             let handle = query_param(query, "h").unwrap_or_default();
             let body = render_seat_lookup(book, &handle);
@@ -1106,7 +1177,7 @@ mod tests {
             opencode_js_bin: DEFAULT_OPENCODE_JS_BIN.to_string(),
         };
         let mut gnn = GnnInference::new();
-        let feed = render_feed(&default_room(), &config, &SeatBook::default(), Instant::now(), &mut gnn);
+        let feed = render_feed(&default_room(), &config, &SeatBook::default(), Instant::now(), &mut gnn, &AgentRegistry::new());
         assert!(feed.contains("HOST8HDR|"));
         assert!(feed.contains("json=0"));
         assert!(!feed.contains('{'));
