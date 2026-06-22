@@ -55,6 +55,9 @@ pub mod glyph_genesis;
 pub mod gnn;
 pub mod highway;
 pub mod sign_gate;
+/// Spawn gate ring — composes sign_gate + hookwall tier + reverse-gain into one spawn verdict
+/// (BLOCK>HOLD>PROCEED), evaluated before any gated launch. Pure/E=0: verdict only, no cosign append.
+pub mod spawn_gate;
 pub mod tier;
 pub mod tier_gate;
 pub mod transit;
