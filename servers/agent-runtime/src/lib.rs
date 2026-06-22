@@ -30,6 +30,10 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+/// C/D substrate room routing (clean-room port of project-room-router.mjs). C = rotating project
+/// rooms ($0 rename-before-load), D = prism/gulp/cube output. Pure/E=0 planners; no fs, no launch.
+pub mod rooms;
+
 /// Access tier mirror (was `crate::syscall::AccessTier` in kernel-core).
 ///
 /// Local copy preserves the kernel's tier taxonomy without forcing this
