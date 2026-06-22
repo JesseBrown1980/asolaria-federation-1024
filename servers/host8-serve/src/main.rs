@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use asolaria_kernel_core::{FEDERATION_ANCHOR_PID, KERNEL_VERSION};
 use asolaria_server_agent_runtime::spawn_child_agent_count;
 use asolaria_server_cosign_ledger::CosignChain;
-use asolaria_server_gnn_oracle::GnnInference;
+use asolaria_server_gnn_oracle::{GnnInference, ObservedFrame};
 use asolaria_server_highway::check_transit;
 use asolaria_server_tier_policy::{policy_for, AccessTier};
 
@@ -80,6 +80,7 @@ struct SeatBook {
 struct Config {
     bind: String,
     room_stub_path: Option<String>,
+    cadence_frame_path: Option<String>,
     office_dir: String,
     feed_dir: String,
     once: bool,
@@ -104,8 +105,9 @@ fn main() {
     book.verbs = load_verb_catalog(&config.verb_catalog);
 
     let started = Instant::now();
+    let mut gnn = GnnInference::new();
     if config.once {
-        print!("{}", render_feed(&room, &config, &book, started));
+        print!("{}", render_feed(&room, &config, &book, started, &mut gnn));
         return;
     }
 
@@ -137,7 +139,7 @@ fn main() {
 
     for stream in listener.incoming() {
         match stream {
-            Ok(stream) => handle_client(stream, &room, &config, &book, started),
+            Ok(stream) => handle_client(stream, &room, &config, &book, started, &mut gnn),
             Err(error) => eprintln!("HOST8ERR|accept={}|json=0", hbp_escape(error.to_string())),
         }
     }
@@ -173,6 +175,7 @@ where
     let mut config = Config {
         bind: DEFAULT_BIND.to_string(),
         room_stub_path: None,
+        cadence_frame_path: env::var("ASOLARIA_CADENCE_FRAME").ok(),
         office_dir: DEFAULT_OFFICE_DIR.to_string(),
         feed_dir: DEFAULT_FEED_DIR.to_string(),
         once: false,
@@ -222,6 +225,12 @@ where
             "--summon-root" => {
                 if let Some(value) = args.get(i + 1) {
                     config.summon_root = value.clone();
+                    i += 1;
+                }
+            }
+            "--cadence-frame" => {
+                if let Some(value) = args.get(i + 1) {
+                    config.cadence_frame_path = Some(value.clone());
                     i += 1;
                 }
             }
@@ -640,9 +649,61 @@ fn hbp_escape<T: ToString>(value: T) -> String {
         .collect()
 }
 
-fn render_feed(room: &Room, config: &Config, book: &SeatBook, started: Instant) -> String {
+fn parse_u64_field(value: &str) -> Option<u64> {
+    let trimmed = value.trim();
+    if let Some(hex) = trimmed.strip_prefix("0x") {
+        u64::from_str_radix(hex, 16).ok()
+    } else if trimmed.chars().all(|ch| ch.is_ascii_hexdigit())
+        && trimmed.chars().any(|ch| ch.is_ascii_alphabetic())
+    {
+        u64::from_str_radix(trimmed, 16).ok()
+    } else {
+        trimmed.parse::<u64>().ok()
+    }
+}
+
+/// Load the latest tick-stamped observed frame from a cadence HBP file (pixels-before-GPU input).
+fn load_observed_frame(path: &str) -> Option<ObservedFrame> {
+    let body = fs::read_to_string(path).ok()?;
+    let line = body.lines().rev().find(|line| line.contains("tick="))?;
+    let tick = hbp_field(line, "tick").and_then(|v| parse_u64_field(&v))?;
+    let phash = hbp_field(line, "phash").and_then(|v| parse_u64_field(&v))?;
+    let frame_delta = hbp_field(line, "frame_delta")
+        .and_then(|v| parse_u64_field(&v))
+        .unwrap_or(0)
+        .min(u32::MAX as u64) as u32;
+    let entropy_q = hbp_field(line, "entropy_q")
+        .and_then(|v| parse_u64_field(&v))
+        .unwrap_or(0)
+        .min(u32::MAX as u64) as u32;
+    let pid_fingerprint = hbp_field(line, "pid_fingerprint")
+        .and_then(|v| parse_u64_field(&v))
+        .or_else(|| hbp_field(line, "pid").map(|pid| fnv1a64(&pid)))
+        .unwrap_or(0);
+    Some(ObservedFrame { tick, phash, frame_delta, entropy_q, pid_fingerprint })
+}
+
+fn render_feed(
+    room: &Room,
+    config: &Config,
+    book: &SeatBook,
+    started: Instant,
+    gnn: &mut GnnInference,
+) -> String {
     let chain = CosignChain::new();
-    let gnn_ready = GnnInference::new().is_ready();
+    // pixels-before-GPU: readiness binds a fresh cadence frame, not a loaded model.
+    let gnn_frame_source = config.cadence_frame_path.as_deref().unwrap_or("-");
+    let gnn_frame_ingested = config
+        .cadence_frame_path
+        .as_deref()
+        .and_then(load_observed_frame)
+        .map(|frame| gnn.observe_frame(frame))
+        .unwrap_or(false);
+    let gnn_ready = gnn.is_ready();
+    let gnn_engine = gnn.engine_mode();
+    let gnn_model_sha16 = gnn.model_sha16().unwrap_or("-").to_string();
+    let gnn_frame_tick = gnn.latest_frame().map(|f| f.tick).unwrap_or(0);
+    let gnn_score_q = gnn.preview_latest_score_q().unwrap_or(0);
     let public_policy = policy_for(AccessTier::Public);
     let public_to_secret = check_transit(AccessTier::Public, AccessTier::Secret)
         .map(|verdict| verdict.authorized)
@@ -675,10 +736,16 @@ fn render_feed(room: &Room, config: &Config, book: &SeatBook, started: Instant) 
             hbp_escape(room_stub_source)
         ),
         format!(
-            "HOST8LIBS|agent_runtime_spawn_count={}|cosign_head={}|gnn_ready={}|public_policy={:?}|public_to_secret_authorized={}|json=0",
+            "HOST8LIBS|agent_runtime_spawn_count={}|cosign_head={}|gnn_ready={}|gnn_engine={}|gnn_model_sha16={}|gnn_frame_source={}|gnn_frame_ingested={}|gnn_frame_tick={}|gnn_score_q={}|public_policy={:?}|public_to_secret_authorized={}|json=0",
             spawn_child_agent_count(),
             hbp_escape(chain.head()),
             if gnn_ready { 1 } else { 0 },
+            hbp_escape(gnn_engine),
+            hbp_escape(&gnn_model_sha16),
+            hbp_escape(gnn_frame_source),
+            if gnn_frame_ingested { 1 } else { 0 },
+            gnn_frame_tick,
+            gnn_score_q,
             public_policy.authority,
             if public_to_secret { 1 } else { 0 }
         ),
@@ -946,6 +1013,7 @@ fn handle_client(
     config: &Config,
     book: &SeatBook,
     started: Instant,
+    gnn: &mut GnnInference,
 ) {
     let mut buffer = [0u8; 2048];
     let read = match stream.read(&mut buffer) {
@@ -961,7 +1029,7 @@ fn handle_client(
     };
     let (status, body) = match path {
         "/" | "/health.hbp" | "/room.hbp" | "/feed.hbp" => {
-            ("200 OK", render_feed(room, config, book, started))
+            ("200 OK", render_feed(room, config, book, started, gnn))
         }
         "/seats.hbp" => ("200 OK", render_seats(book)),
         "/count.hbp" => ("200 OK", render_count(book)),
@@ -1028,6 +1096,7 @@ mod tests {
         let config = Config {
             bind: DEFAULT_BIND.to_string(),
             room_stub_path: None,
+            cadence_frame_path: None,
             office_dir: DEFAULT_OFFICE_DIR.to_string(),
             feed_dir: DEFAULT_FEED_DIR.to_string(),
             once: true,
@@ -1036,7 +1105,8 @@ mod tests {
             summon_model: DEFAULT_SUMMON_MODEL.to_string(),
             opencode_js_bin: DEFAULT_OPENCODE_JS_BIN.to_string(),
         };
-        let feed = render_feed(&default_room(), &config, &SeatBook::default(), Instant::now());
+        let mut gnn = GnnInference::new();
+        let feed = render_feed(&default_room(), &config, &SeatBook::default(), Instant::now(), &mut gnn);
         assert!(feed.contains("HOST8HDR|"));
         assert!(feed.contains("json=0"));
         assert!(!feed.contains('{'));
@@ -1225,6 +1295,7 @@ mod tests {
         let config = Config {
             bind: DEFAULT_BIND.to_string(),
             room_stub_path: None,
+            cadence_frame_path: None,
             office_dir: DEFAULT_OFFICE_DIR.to_string(),
             feed_dir: DEFAULT_FEED_DIR.to_string(),
             once: false,
