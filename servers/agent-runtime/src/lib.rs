@@ -34,6 +34,10 @@ use alloc::vec::Vec;
 /// rooms ($0 rename-before-load), D = prism/gulp/cube output. Pure/E=0 planners; no fs, no launch.
 pub mod rooms;
 
+/// Free-agent runner lane table (role -> OpenCode/Hermes runner spec). Pure/E=0 mapping; the actual
+/// CLI launch is host8-gated.
+pub mod runners;
+
 /// Access tier mirror (was `crate::syscall::AccessTier` in kernel-core).
 ///
 /// Local copy preserves the kernel's tier taxonomy without forcing this
