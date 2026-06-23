@@ -3,6 +3,19 @@
 version = 3
 
 [[package]]
+name = "asolaria-host8-serve"
+version = "0.1.0"
+dependencies = [
+ "asolaria-kernel-core",
+ "asolaria-server-agent-runtime",
+ "asolaria-server-cosign-ledger",
+ "asolaria-server-gnn-oracle",
+ "asolaria-server-highway",
+ "asolaria-server-tier-policy",
+ "sha2",
+]
+
+[[package]]
 name = "asolaria-kernel-core"
 version = "0.1.0"
 dependencies = [

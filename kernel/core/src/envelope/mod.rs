@@ -16,6 +16,12 @@
 use core::result::Result;
 use core::sync::atomic::{AtomicU32, AtomicU8, AtomicUsize, Ordering};
 
+/// FEDENV-v1 application-envelope contract — the omnidispatcher route-layer validator + target
+/// resolution (ported from `tools/omnidispatcher/{validator,routes}.mjs`). Pure/E=0: validates and
+/// classifies a route; does NOT dispatch. Sits in front of the agent registry (corrected wiring
+/// order). `tools/omnidispatcher` is the node-vs-Rust parity oracle.
+pub mod fedenv;
+
 /// Ring-buffer capacity per kernel invariant (Step 29 target).
 pub const ENVELOPE_QUEUE_CAPACITY: usize = 16384;
 
