@@ -1,0 +1,16 @@
+[package]
+name = "hookwall-session-start"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# AoT Rust port of the Claude Code SessionStart lifecycle hook (was session-start.mjs).
+# 8-byte host process controlling stubbed rooms. No node, no json, no http.
+
+[[bin]]
+name = "hookwall-session-start"
+path = "src/main.rs"
+
+[dependencies]
