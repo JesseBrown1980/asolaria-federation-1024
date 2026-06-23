@@ -113,7 +113,10 @@ mod tests {
     #[test]
     fn substrate_split_c_rooms_d_prism() {
         assert_eq!(substrate_for_stage(RoomStage::AgentRoom), Substrate::CDrive);
-        assert_eq!(substrate_for_stage(RoomStage::PrismOutput), Substrate::DDrive);
+        assert_eq!(
+            substrate_for_stage(RoomStage::PrismOutput),
+            Substrate::DDrive
+        );
     }
 
     #[test]

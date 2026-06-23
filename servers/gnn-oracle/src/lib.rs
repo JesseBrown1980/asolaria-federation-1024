@@ -480,7 +480,9 @@ mod tests {
     #[test]
     fn route_uses_byte_measurement() {
         let g = GnnInference::new();
-        let route = g.predict_route(b"HBPv1|row=edge|payload=abcd1234|json=0").unwrap();
+        let route = g
+            .predict_route(b"HBPv1|row=edge|payload=abcd1234|json=0")
+            .unwrap();
         assert!(matches!(
             route,
             RoutingDecision::Local
@@ -493,9 +495,18 @@ mod tests {
     #[test]
     fn verdict_aggregates_votes() {
         let g = GnnInference::new();
-        assert_eq!(g.aggregate_verdict(85, 100).unwrap(), AggregatedVerdict::ProceedStrong);
-        assert_eq!(g.aggregate_verdict(50, 100).unwrap(), AggregatedVerdict::Hold);
-        assert_eq!(g.aggregate_verdict(10, 100).unwrap(), AggregatedVerdict::Block);
+        assert_eq!(
+            g.aggregate_verdict(85, 100).unwrap(),
+            AggregatedVerdict::ProceedStrong
+        );
+        assert_eq!(
+            g.aggregate_verdict(50, 100).unwrap(),
+            AggregatedVerdict::Hold
+        );
+        assert_eq!(
+            g.aggregate_verdict(10, 100).unwrap(),
+            AggregatedVerdict::Block
+        );
     }
 
     #[test]
@@ -514,7 +525,9 @@ mod tests {
     #[test]
     fn control_bytes_are_penalized() {
         let g = GnnInference::new();
-        let plain = g.score_bytes(b"HBPv1|row=edge|payload=abcd1234|json=0").unwrap();
+        let plain = g
+            .score_bytes(b"HBPv1|row=edge|payload=abcd1234|json=0")
+            .unwrap();
         let controls = g.score_bytes(&[0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         assert!(plain > controls);
     }
@@ -549,9 +562,18 @@ mod tests {
 
     #[test]
     fn omniflywheel_promote_needs_high_score_and_low_reverse_risk() {
-        assert!(omniflywheel_promote(0.80, 0.10), "high score + low risk promotes");
-        assert!(!omniflywheel_promote(0.80, 0.40), "high reverse risk blocks promotion");
-        assert!(!omniflywheel_promote(0.60, 0.10), "low score blocks promotion");
+        assert!(
+            omniflywheel_promote(0.80, 0.10),
+            "high score + low risk promotes"
+        );
+        assert!(
+            !omniflywheel_promote(0.80, 0.40),
+            "high reverse risk blocks promotion"
+        );
+        assert!(
+            !omniflywheel_promote(0.60, 0.10),
+            "low score blocks promotion"
+        );
         // exactly at both bounds promotes (>= score, <= risk).
         assert!(omniflywheel_promote(
             WHITEROOM_GENIUS_THRESHOLD,

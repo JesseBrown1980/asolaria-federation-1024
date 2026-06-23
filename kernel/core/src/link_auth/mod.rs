@@ -190,8 +190,18 @@ pub fn granted_level(owner_pid: &str, grants: &[LinkGrant<'_>]) -> Option<u8> {
 /// the owner has no grant. The serve layer filters index rows to those tagged `level <= this` — so
 /// a third-party owner granted only level 0 sees public rows even if they ask for level 9, and the
 /// owner's own trusted link sees PII only up to the level the owner actually granted.
-pub fn effective_level(owner_pid: &str, requested_level: u8, grants: &[LinkGrant<'_>]) -> Option<u8> {
-    granted_level(owner_pid, grants).map(|g| if requested_level < g { requested_level } else { g })
+pub fn effective_level(
+    owner_pid: &str,
+    requested_level: u8,
+    grants: &[LinkGrant<'_>],
+) -> Option<u8> {
+    granted_level(owner_pid, grants).map(|g| {
+        if requested_level < g {
+            requested_level
+        } else {
+            g
+        }
+    })
 }
 
 /// Constant-time-ish compare of a 32-byte MAC to a 64-char lowercase-hex string (no early-out).
@@ -237,7 +247,10 @@ mod tests {
         let mac = hmac_sha256_parts(b"key", &[b"The quick brown fox jumps over the lazy dog"]);
         let hex = hex32(&mac);
         let s = core::str::from_utf8(&hex).unwrap();
-        assert_eq!(s, "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8");
+        assert_eq!(
+            s,
+            "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8"
+        );
     }
 
     fn signed_request<'a>(
@@ -285,7 +298,10 @@ mod tests {
     fn valid_keyed_consented_fresh_request_is_allowed() {
         let mut hb = [0u8; 64];
         let req = signed_request(KEY, "OP-RAYSSA", "liris", "search", "n1", 1000, &mut hb);
-        assert_eq!(verify_link(&req, KEY, GRANTS, 1005, 120), LinkVerdict::Allow);
+        assert_eq!(
+            verify_link(&req, KEY, GRANTS, 1005, 120),
+            LinkVerdict::Allow
+        );
     }
 
     #[test]
@@ -314,7 +330,10 @@ mod tests {
         let mut hb = [0u8; 64];
         let req = signed_request(KEY, "OP-JESSE", "acer", "search", "n1", 1000, &mut hb);
         // 1000 + 9999 skew, window 120 -> stale.
-        assert_eq!(verify_link(&req, KEY, GRANTS, 1000 + 9999, 120), LinkVerdict::DenyStale);
+        assert_eq!(
+            verify_link(&req, KEY, GRANTS, 1000 + 9999, 120),
+            LinkVerdict::DenyStale
+        );
     }
 
     #[test]
@@ -324,7 +343,10 @@ mod tests {
         let mut hb = [0u8; 64];
         let mut req = signed_request(KEY, "OP-RAYSSA", "liris", "search", "n1", 1000, &mut hb);
         req.verb = "fabric-write";
-        assert_eq!(verify_link(&req, KEY, GRANTS, 1005, 120), LinkVerdict::DenyBadHmac);
+        assert_eq!(
+            verify_link(&req, KEY, GRANTS, 1005, 120),
+            LinkVerdict::DenyBadHmac
+        );
     }
 
     #[test]
@@ -337,7 +359,10 @@ mod tests {
             ts_unix_s: 1000,
             hmac_hex: "tooshort",
         };
-        assert_eq!(verify_link(&req, KEY, GRANTS, 1005, 120), LinkVerdict::DenyMalformed);
+        assert_eq!(
+            verify_link(&req, KEY, GRANTS, 1005, 120),
+            LinkVerdict::DenyMalformed
+        );
     }
 
     #[test]
@@ -345,13 +370,19 @@ mod tests {
         // The operator's "share different levels of their fabric to other fabrics": the owner's own
         // trusted link gets the top level (incl PII); a third-party guest gets public-clean only.
         let grants = &[
-            LinkGrant { owner_pid: "OP-RAYSSA", max_level: 9 },          // trusted link -> full incl PII
-            LinkGrant { owner_pid: "OP-GUEST", max_level: LEVEL_PUBLIC }, // third party -> public only
+            LinkGrant {
+                owner_pid: "OP-RAYSSA",
+                max_level: 9,
+            }, // trusted link -> full incl PII
+            LinkGrant {
+                owner_pid: "OP-GUEST",
+                max_level: LEVEL_PUBLIC,
+            }, // third party -> public only
         ];
         assert_eq!(granted_level("OP-RAYSSA", grants), Some(9));
         assert_eq!(granted_level("OP-GUEST", grants), Some(LEVEL_PUBLIC));
         assert_eq!(granted_level("OP-STRANGER", grants), None); // ungranted -> nothing
-        // a third-party guest asking for a high level is clamped to public:
+                                                                // a third-party guest asking for a high level is clamped to public:
         assert_eq!(effective_level("OP-GUEST", 9, grants), Some(LEVEL_PUBLIC));
         // the trusted link gets up to its ceiling, never above:
         assert_eq!(effective_level("OP-RAYSSA", 5, grants), Some(5));

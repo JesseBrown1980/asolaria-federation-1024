@@ -352,7 +352,10 @@ mod tests {
         assert_eq!(resolve_target("cli:eng:opencode"), Some(RouteKind::Cli));
         assert_eq!(resolve_target("pid:H740C"), Some(RouteKind::PidRouted));
         assert_eq!(resolve_target("citizen:liris"), Some(RouteKind::Citizen));
-        assert_eq!(resolve_target("antigravity:gpt"), Some(RouteKind::Antigravity));
+        assert_eq!(
+            resolve_target("antigravity:gpt"),
+            Some(RouteKind::Antigravity)
+        );
         assert_eq!(resolve_target("daemon:gaia"), Some(RouteKind::Daemon));
         assert_eq!(resolve_target("google:bigquery"), Some(RouteKind::Google));
         assert_eq!(resolve_target("meta:sup"), Some(RouteKind::Meta));
@@ -369,7 +372,10 @@ mod tests {
 
     #[test]
     fn reject_reason_event_strings() {
-        assert_eq!(RejectReason::Malformed.as_event_str(), "EVT-FEDENV-REJECTED-MALFORMED");
+        assert_eq!(
+            RejectReason::Malformed.as_event_str(),
+            "EVT-FEDENV-REJECTED-MALFORMED"
+        );
         assert_eq!(
             RejectReason::UnresolvableTarget.as_event_str(),
             "EVT-FEDENV-REJECTED-UNRESOLVABLE-TARGET"
@@ -407,7 +413,11 @@ mod tests {
         e.payload = payload;
         e.ts = Some(ts);
         e.row_hash = hexstr;
-        assert_eq!(validate(&e), Ok(()), "correct row_hash with ts present must pass");
+        assert_eq!(
+            validate(&e),
+            Ok(()),
+            "correct row_hash with ts present must pass"
+        );
         // Tamper: a valid-shape but wrong row_hash with ts present must be rejected.
         e.row_hash = "ffffffffffffffff";
         assert_eq!(validate(&e), Err(RejectReason::RowHashMismatch));

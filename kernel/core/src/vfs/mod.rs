@@ -519,7 +519,10 @@ mod tests {
         let fd = vfs_open(b"/foo", O_RDONLY).expect("open");
         assert!(vfs_is_open(fd));
         reset_for_tests();
-        assert!(!vfs_is_open(fd), "user-allocated slot must be Free after reset");
+        assert!(
+            !vfs_is_open(fd),
+            "user-allocated slot must be Free after reset"
+        );
         assert!(vfs_is_open(STDIN_FD), "stdin remains conceptually open");
         assert!(vfs_is_open(STDOUT_FD), "stdout remains conceptually open");
         assert!(vfs_is_open(STDERR_FD), "stderr remains conceptually open");
