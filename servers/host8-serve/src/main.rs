@@ -802,6 +802,7 @@ fn render_feed(
         "HOST8ROUTE|path=/v1/envelope.hbp?caller=&target=&verb=&payload=&cube=&glyph=&cosign=&ttl=&ant=&row=[&ts=]|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/launch-plan.hbp?h=<handle8>&device=<d>&ts=<unix>&role=<hermes|sub>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/summon-batch.hbp?count=<N>&role=<hermes|sub>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
+        "HOST8ROUTE|path=/shadow-parity.hbp?count=<N>&device=<d>&role=<hermes|sub>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
     ]
     .join("\n")
         + "\n"
@@ -1270,6 +1271,87 @@ fn render_summon_batch(book: &SeatBook, config: &Config, gnn_score_q: u32, query
     out
 }
 
+/// `/shadow-parity.hbp?count=N&device=&role=&score=&risk=` — #25: replay the resolve-only
+/// `/summon.hbp` path beside the dry `/launch-plan.hbp` path and prove they agree on identity
+/// (`instance_pid`) while both keep `process_launch=0`. This is the replay surface for #26:
+/// shadow proof first, then 100B replay prep, then any controlled fire request. It NEVER passes
+/// `fire=1` to summon and never launches a process.
+fn render_shadow_parity(book: &SeatBook, config: &Config, gnn_score_q: u32, query: &str) -> String {
+    const MAX_SHADOW: usize = 1000;
+    let requested = query_param(query, "count")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(1);
+    let n = requested.min(MAX_SHADOW).min(book.seats.len());
+    let device = query_param(query, "device").unwrap_or_else(|| "acer".to_string());
+    let ts = query_param(query, "ts")
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| unix_seconds().to_string());
+    let role = query_param(query, "role").unwrap_or_default();
+    let score = query_param(query, "score").unwrap_or_default();
+    let risk = query_param(query, "risk").unwrap_or_default();
+
+    let mut rows = String::new();
+    let mut matched = 0usize;
+    let mut mismatched = 0usize;
+    let mut proceed = 0usize;
+    let mut hold = 0usize;
+    let mut block = 0usize;
+
+    for seat in book.seats.iter().take(n) {
+        let summon_query = format!("h={}&device={}&ts={}", seat.handle8, device, ts);
+        let plan_query = format!(
+            "h={}&device={}&ts={}&role={}&score={}&risk={}",
+            seat.handle8, device, ts, role, score, risk
+        );
+
+        let (summon_ok, summon_line) = render_summon(book, config, &summon_query);
+        let (plan_ok, plan_line) = render_launch_plan(book, config, gnn_score_q, &plan_query);
+        let summon_pid = hbp_field(&summon_line, "instance_pid").unwrap_or_default();
+        let plan_pid = hbp_field(&plan_line, "instance_pid").unwrap_or_default();
+        let summon_fired = hbp_field(&summon_line, "fired").unwrap_or_default();
+        let plan_launch = hbp_field(&plan_line, "process_launch").unwrap_or_default();
+        let gate = hbp_field(&plan_line, "gate_verdict").unwrap_or_else(|| "BLOCK".to_string());
+
+        match gate.as_str() {
+            "PROCEED" => proceed += 1,
+            "HOLD" => hold += 1,
+            _ => block += 1,
+        }
+
+        let parity_ok = summon_ok
+            && plan_ok
+            && !summon_pid.is_empty()
+            && summon_pid == plan_pid
+            && summon_fired == "0"
+            && plan_launch == "0";
+        if parity_ok {
+            matched += 1;
+        } else {
+            mismatched += 1;
+        }
+
+        rows.push_str(&format!(
+            "HOST8SHADOWROW|handle8={}|summon_ok={}|plan_ok={}|summon_pid={}|plan_pid={}|gate_verdict={}|summon_fired={}|process_launch={}|parity={}|json=0\n",
+            hbp_escape(&seat.handle8),
+            if summon_ok { 1 } else { 0 },
+            if plan_ok { 1 } else { 0 },
+            hbp_escape(&summon_pid),
+            hbp_escape(&plan_pid),
+            hbp_escape(&gate),
+            hbp_escape(&summon_fired),
+            hbp_escape(&plan_launch),
+            if parity_ok { "OK" } else { "MISMATCH" },
+        ));
+    }
+
+    let mut out = format!(
+        "HOST8SHADOW|requested={}|checked={}|matched={}|mismatched={}|proceed={}|hold={}|block={}|process_launch=0|fire_param=absent|json=0\n",
+        requested, n, matched, mismatched, proceed, hold, block
+    );
+    out.push_str(&rows);
+    out
+}
+
 fn handle_client(
     mut stream: TcpStream,
     room: &Room,
@@ -1311,6 +1393,10 @@ fn handle_client(
         "/summon-batch.hbp" => {
             let gnn_score_q = gnn.preview_latest_score_q().unwrap_or(0);
             ("200 OK", render_summon_batch(book, config, gnn_score_q, query))
+        }
+        "/shadow-parity.hbp" => {
+            let gnn_score_q = gnn.preview_latest_score_q().unwrap_or(0);
+            ("200 OK", render_shadow_parity(book, config, gnn_score_q, query))
         }
         "/seat.hbp" => {
             let handle = query_param(query, "h").unwrap_or_default();
@@ -1705,5 +1791,50 @@ mod tests {
         assert!(held.contains("hold=2"));
         assert!(held.contains("proceed=0"));
         assert!(held.contains("process_launch=0"));
+    }
+
+    #[test]
+    fn shadow_parity_compares_summon_resolve_to_launch_plan_without_fire() {
+        let (book, config) = launch_plan_test_fixture();
+        let out = render_shadow_parity(
+            &book,
+            &config,
+            0,
+            "count=1&device=acer&ts=1750000000&score=800&risk=10",
+        );
+        assert!(out.contains("HOST8SHADOW|requested=1|checked=1|matched=1|mismatched=0"));
+        assert!(out.contains("HOST8SHADOWROW|handle8=0155964ffc8ef1f8"));
+        assert!(out.contains(&format!("summon_pid={}", NODE_INSTANCE_PID)));
+        assert!(out.contains(&format!("plan_pid={}", NODE_INSTANCE_PID)));
+        assert!(out.contains("gate_verdict=PROCEED"));
+        assert!(out.contains("summon_fired=0"));
+        assert!(out.contains("process_launch=0"));
+        assert!(out.contains("fire_param=absent"));
+        assert!(out.contains("parity=OK"));
+        assert!(out.contains("json=0"));
+        assert!(!out.contains('{'));
+        assert!(!out.contains('}'));
+    }
+
+    #[test]
+    fn shadow_parity_batch_holds_without_genius_score() {
+        let (mut book, config) = launch_plan_test_fixture();
+        book.seats.push(Seat {
+            name: "AGT-C4".to_string(),
+            handle8: "f679158eb8ca4531".to_string(),
+            cube_bh: "BH.4.0.100".to_string(),
+            hilbert: "930".to_string(),
+            class: "hyperbehcs_supervisor_entity".to_string(),
+            layer: "supervisor".to_string(),
+            source: "test".to_string(),
+        });
+        let out = render_shadow_parity(&book, &config, 0, "count=2&device=acer&ts=1750000000");
+        assert!(out.contains("checked=2"));
+        assert!(out.contains("matched=2"));
+        assert!(out.contains("mismatched=0"));
+        assert!(out.contains("hold=2"));
+        assert_eq!(out.matches("HOST8SHADOWROW|").count(), 2);
+        assert!(out.contains("process_launch=0"));
+        assert!(!out.contains("fire=1"));
     }
 }
