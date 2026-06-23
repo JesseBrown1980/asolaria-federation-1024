@@ -94,7 +94,7 @@ const ROOMS: [Room; 5] = [
     room(
         "google_drive",
         "proof_master_repo",
-        0,
+        9,
         "OPERATOR_OBSERVED",
         "gdrive:/1vhEsLhSTTxeSfc8aICox_wYZSN7aQeX8",
     ),
@@ -205,7 +205,7 @@ mod tests {
             .find(|r| r.kind == "google_drive")
             .expect("drive room present");
         assert_eq!(g.status, "OPERATOR_OBSERVED");
-        assert_eq!(g.access, 0);
+        assert_eq!(g.access, 9);
         assert!(g.stub.contains("1vhEsLhSTTxeSfc8aICox_wYZSN7aQeX8"));
     }
 
