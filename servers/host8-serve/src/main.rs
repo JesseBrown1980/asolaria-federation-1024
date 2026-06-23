@@ -1,9 +1,10 @@
 use std::env;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process;
 use std::process::Command;
+use std::path::Path;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
@@ -803,7 +804,7 @@ fn render_feed(
         "HOST8ROUTE|path=/launch-plan.hbp?h=<handle8>&device=<d>&ts=<unix>&role=<hermes|sub>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/summon-batch.hbp?count=<N>&role=<hermes|sub>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/shadow-parity.hbp?count=<N>&device=<d>&role=<hermes|sub>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
-        "HOST8ROUTE|path=/replay-prep.hbp?target=<N>&sample=<N>&batch=<N>&device=<d>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
+        "HOST8ROUTE|path=/replay-prep.hbp?target=<N>&sample=<N>&batch=<N>&device=<d>&score=<q>&risk=<q>&registry=<dir>&chunk_limit=<N>|method=GET|format=HBP|json=0".to_string(),
     ]
     .join("\n")
         + "\n"
@@ -1367,10 +1368,213 @@ fn ceil_div_u128(n: u128, d: u128) -> u128 {
     }
 }
 
-/// `/replay-prep.hbp?target=N&sample=N&batch=N&device=&score=&risk=` — #26: prepare the
-/// controlled 100B replay without running it. It samples the #25 shadow parity surface, computes
-/// the batch geometry for the requested target, and emits a hard gate receipt. It is deliberately
-/// conservative: even if the sample is clean, `auto_fire_allowed=0` and `process_launch=0` remain.
+const REAL_100B_CHECKPOINT_FILE: &str = "checkpoint.state.json";
+const REAL_100B_CHUNKS_FILE: &str = "real-100b-chunks.ndjson";
+
+#[derive(Debug, Default)]
+struct RegistryReplayStats {
+    loaded: bool,
+    error: String,
+    path_sha16: String,
+    checkpoint_processed: u128,
+    checkpoint_target: u128,
+    checkpoint_completed_chunks: u128,
+    checkpoint_status: String,
+    checkpoint_last_pid: String,
+    chunks_seen: u128,
+    chunks_loaded: u128,
+    chunks_malformed: u128,
+    packets_loaded: u128,
+    genius_hits: u128,
+    mistake_hits: u128,
+    weighted_score: f64,
+    weighted_reverse_gain: f64,
+    first_chunk_hash: String,
+    last_chunk_hash: String,
+    promote_chunks: u128,
+    hold_chunks: u128,
+}
+
+fn json_key_pos(text: &str, key: &str) -> Option<usize> {
+    text.find(&format!("\"{}\"", key))
+}
+
+fn json_value_start(text: &str, key: &str) -> Option<usize> {
+    let key_pos = json_key_pos(text, key)?;
+    let after_key = &text[key_pos..];
+    let colon_rel = after_key.find(':')?;
+    Some(key_pos + colon_rel + 1)
+}
+
+fn json_string_field(text: &str, key: &str) -> Option<String> {
+    let mut i = json_value_start(text, key)?;
+    let bytes = text.as_bytes();
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= bytes.len() || bytes[i] != b'"' {
+        return None;
+    }
+    i += 1;
+    let start = i;
+    while i < bytes.len() {
+        if bytes[i] == b'"' {
+            return Some(text[start..i].to_string());
+        }
+        i += 1;
+    }
+    None
+}
+
+fn json_number_slice<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+    let mut i = json_value_start(text, key)?;
+    let bytes = text.as_bytes();
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let start = i;
+    while i < bytes.len()
+        && (bytes[i].is_ascii_digit()
+            || bytes[i] == b'.'
+            || bytes[i] == b'-'
+            || bytes[i] == b'+'
+            || bytes[i] == b'e'
+            || bytes[i] == b'E')
+    {
+        i += 1;
+    }
+    if i == start {
+        None
+    } else {
+        Some(&text[start..i])
+    }
+}
+
+fn json_u128_field(text: &str, key: &str) -> Option<u128> {
+    json_number_slice(text, key)?.parse::<u128>().ok()
+}
+
+fn json_f64_field(text: &str, key: &str) -> Option<f64> {
+    json_number_slice(text, key)?.parse::<f64>().ok()
+}
+
+fn q_from_unit(v: f64) -> u32 {
+    if !v.is_finite() {
+        return 0;
+    }
+    let clamped = v.clamp(0.0, 1.0);
+    (clamped * 1000.0).round() as u32
+}
+
+fn reverse_risk_q_from_reverse_gain(avg_reverse_gain: f64) -> u32 {
+    q_from_unit(1.0 - avg_reverse_gain)
+}
+
+fn registry_path_from_query(query: &str) -> Option<String> {
+    query_param(query, "registry")
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| env::var("ASOLARIA_100B_REGISTRY_DIR").ok())
+        .map(|v| v.trim().to_string())
+}
+
+fn load_100b_registry_stats(registry_dir: &str, chunk_limit: Option<u128>) -> RegistryReplayStats {
+    let mut stats = RegistryReplayStats {
+        path_sha16: sha16(registry_dir),
+        ..RegistryReplayStats::default()
+    };
+    let root = Path::new(registry_dir);
+    let checkpoint_path = root.join(REAL_100B_CHECKPOINT_FILE);
+    let chunks_path = root.join(REAL_100B_CHUNKS_FILE);
+
+    let checkpoint = match fs::read_to_string(&checkpoint_path) {
+        Ok(text) => text,
+        Err(err) => {
+            stats.error = format!("checkpoint_read_failed:{:?}", err.kind());
+            return stats;
+        }
+    };
+    stats.checkpoint_processed = json_u128_field(&checkpoint, "processedPackets").unwrap_or(0);
+    stats.checkpoint_target = json_u128_field(&checkpoint, "targetPackets").unwrap_or(0);
+    stats.checkpoint_completed_chunks = json_u128_field(&checkpoint, "completedChunks").unwrap_or(0);
+    stats.checkpoint_status =
+        json_string_field(&checkpoint, "status").unwrap_or_else(|| "missing".to_string());
+    stats.checkpoint_last_pid =
+        json_string_field(&checkpoint, "lastPacketPid").unwrap_or_else(|| "missing".to_string());
+
+    let file = match fs::File::open(&chunks_path) {
+        Ok(file) => file,
+        Err(err) => {
+            stats.error = format!("chunks_read_failed:{:?}", err.kind());
+            return stats;
+        }
+    };
+
+    let mut score_weight = 0.0f64;
+    let mut rg_weight = 0.0f64;
+    let mut weight_total = 0.0f64;
+    let limit = chunk_limit.unwrap_or(u128::MAX);
+    for line in BufReader::new(file).lines() {
+        if stats.chunks_seen >= limit {
+            break;
+        }
+        let line = match line {
+            Ok(line) => line,
+            Err(_) => {
+                stats.chunks_malformed += 1;
+                continue;
+            }
+        };
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        stats.chunks_seen += 1;
+        let packets = json_u128_field(line, "packets").unwrap_or(0);
+        let avg_score = json_f64_field(line, "avgScore");
+        let avg_reverse_gain = json_f64_field(line, "avgReverseGain");
+        if packets == 0 || avg_score.is_none() || avg_reverse_gain.is_none() {
+            stats.chunks_malformed += 1;
+            continue;
+        }
+        let avg_score = avg_score.unwrap();
+        let avg_reverse_gain = avg_reverse_gain.unwrap();
+        let genius = json_u128_field(line, "geniusHits").unwrap_or(0);
+        let mistake = json_u128_field(line, "mistakeHits").unwrap_or(0);
+        let chunk_hash = json_string_field(line, "chunkHash").unwrap_or_else(|| "-".to_string());
+        if stats.first_chunk_hash.is_empty() {
+            stats.first_chunk_hash = chunk_hash.clone();
+        }
+        stats.last_chunk_hash = chunk_hash;
+        stats.chunks_loaded += 1;
+        stats.packets_loaded += packets;
+        stats.genius_hits += genius;
+        stats.mistake_hits += mistake;
+        let weight = packets as f64;
+        score_weight += avg_score * weight;
+        rg_weight += avg_reverse_gain * weight;
+        weight_total += weight;
+        let score_q = q_from_unit(avg_score);
+        let risk_q = reverse_risk_q_from_reverse_gain(avg_reverse_gain);
+        if score_q >= 720 && risk_q <= 280 {
+            stats.promote_chunks += 1;
+        } else {
+            stats.hold_chunks += 1;
+        }
+    }
+    if weight_total > 0.0 {
+        stats.weighted_score = score_weight / weight_total;
+        stats.weighted_reverse_gain = rg_weight / weight_total;
+    }
+    stats.loaded = stats.chunks_loaded > 0;
+    stats
+}
+
+/// `/replay-prep.hbp?target=N&sample=N&batch=N&device=&score=&risk=&registry=<dir>` — #26:
+/// prepare the controlled 100B replay without running it. It samples the #25 shadow parity surface,
+/// computes the batch geometry for the requested target, optionally reads the real 100B packet
+/// registry (`checkpoint.state.json` + `real-100b-chunks.ndjson`) read-only, and emits hard gate
+/// receipts. It is deliberately conservative: even if the sample and registry are clean,
+/// `auto_fire_allowed=0` and `process_launch=0` remain.
 fn render_replay_prep(book: &SeatBook, config: &Config, gnn_score_q: u32, query: &str) -> String {
     const DEFAULT_TARGET: u128 = 100_000_000_000;
     const DEFAULT_BATCH: u128 = 10_000;
@@ -1390,6 +1594,7 @@ fn render_replay_prep(book: &SeatBook, config: &Config, gnn_score_q: u32, query:
     let score = query_param(query, "score").unwrap_or_default();
     let risk = query_param(query, "risk").unwrap_or_default();
     let batches = ceil_div_u128(target, batch);
+    let chunk_limit = query_param(query, "chunk_limit").and_then(|v| v.parse::<u128>().ok());
 
     let shadow_query = format!(
         "count={}&device={}&ts={}&role={}&score={}&risk={}",
@@ -1418,8 +1623,8 @@ fn render_replay_prep(book: &SeatBook, config: &Config, gnn_score_q: u32, query:
         "shadow_identity_clean_fire_still_gated"
     };
 
-    format!(
-        "HOST8REPLAYPREP|target_total={}|batch_size={}|estimated_batches={}|sample_requested={}|sample_checked={}|sample_matched={}|sample_mismatched={}|sample_proceed={}|sample_hold={}|sample_block={}|status={}|reason={}|packet_registry_loaded=0|shadow_only=1|process_launch=0|auto_fire_allowed=0|operator_t0_required=1|json=0\n",
+    let mut out = format!(
+        "HOST8REPLAYPREP|target_total={}|batch_size={}|estimated_batches={}|sample_requested={}|sample_checked={}|sample_matched={}|sample_mismatched={}|sample_proceed={}|sample_hold={}|sample_block={}|status={}|reason={}|shadow_only=1|process_launch=0|auto_fire_allowed=0|operator_t0_required=1|json=0\n",
         target,
         batch,
         batches,
@@ -1432,7 +1637,60 @@ fn render_replay_prep(book: &SeatBook, config: &Config, gnn_score_q: u32, query:
         hbp_escape(&block),
         status,
         reason
-    )
+    );
+
+    if let Some(registry_dir) = registry_path_from_query(query) {
+        let stats = load_100b_registry_stats(&registry_dir, chunk_limit);
+        let score_q = q_from_unit(stats.weighted_score);
+        let reverse_gain_q = q_from_unit(stats.weighted_reverse_gain);
+        let reverse_risk_q = reverse_risk_q_from_reverse_gain(stats.weighted_reverse_gain);
+        let checkpoint_complete =
+            stats.checkpoint_target > 0 && stats.checkpoint_processed >= stats.checkpoint_target;
+        let packet_complete =
+            stats.checkpoint_target > 0 && stats.packets_loaded >= stats.checkpoint_target;
+        let chunks_complete = stats.checkpoint_completed_chunks > 0
+            && stats.chunks_loaded >= stats.checkpoint_completed_chunks;
+        let registry_status = if !stats.error.is_empty() {
+            "LOAD_ERROR"
+        } else if checkpoint_complete && packet_complete && chunks_complete && stats.hold_chunks == 0 {
+            "READY_DRY_REPLAY"
+        } else {
+            "REVIEW_REQUIRED"
+        };
+        out.push_str(&format!(
+            "HOST8REGISTRY|loaded={}|path_sha16={}|checkpoint_processed={}|checkpoint_target={}|checkpoint_completed_chunks={}|checkpoint_status={}|last_packet_pid={}|chunks_seen={}|chunks_loaded={}|chunks_malformed={}|packets_loaded={}|genius_hits={}|mistake_hits={}|avg_score_q={}|avg_reverse_gain_q={}|reverse_risk_q={}|promote_chunks={}|hold_chunks={}|checkpoint_complete={}|packet_complete={}|chunks_complete={}|registry_status={}|error={}|first_chunk_hash={}|last_chunk_hash={}|reverse_risk_mapping=one_minus_reverse_gain|process_launch=0|auto_fire_allowed=0|json=0\n",
+            if stats.loaded { 1 } else { 0 },
+            hbp_escape(&stats.path_sha16),
+            stats.checkpoint_processed,
+            stats.checkpoint_target,
+            stats.checkpoint_completed_chunks,
+            hbp_escape(&stats.checkpoint_status),
+            hbp_escape(&stats.checkpoint_last_pid),
+            stats.chunks_seen,
+            stats.chunks_loaded,
+            stats.chunks_malformed,
+            stats.packets_loaded,
+            stats.genius_hits,
+            stats.mistake_hits,
+            score_q,
+            reverse_gain_q,
+            reverse_risk_q,
+            stats.promote_chunks,
+            stats.hold_chunks,
+            if checkpoint_complete { 1 } else { 0 },
+            if packet_complete { 1 } else { 0 },
+            if chunks_complete { 1 } else { 0 },
+            registry_status,
+            hbp_escape(&stats.error),
+            hbp_escape(&stats.first_chunk_hash),
+            hbp_escape(&stats.last_chunk_hash),
+        ));
+    } else {
+        out.push_str(
+            "HOST8REGISTRY|loaded=0|registry_status=NOT_REQUESTED|process_launch=0|auto_fire_allowed=0|json=0\n",
+        );
+    }
+    out
 }
 
 fn handle_client(
@@ -1943,7 +2201,8 @@ mod tests {
         assert!(out.contains("sample_matched=1"));
         assert!(out.contains("sample_mismatched=0"));
         assert!(out.contains("status=READY_FOR_PACKET_REGISTRY_REPLAY"));
-        assert!(out.contains("packet_registry_loaded=0"));
+        assert!(out.contains("HOST8REGISTRY|loaded=0"));
+        assert!(out.contains("registry_status=NOT_REQUESTED"));
         assert!(out.contains("shadow_only=1"));
         assert!(out.contains("process_launch=0"));
         assert!(out.contains("auto_fire_allowed=0"));
@@ -1962,5 +2221,70 @@ mod tests {
         assert!(out.contains("status=BLOCKED_NO_SEATS"));
         assert!(out.contains("auto_fire_allowed=0"));
         assert!(out.contains("process_launch=0"));
+    }
+
+    #[test]
+    fn replay_prep_loads_100b_registry_fixture_readonly_and_maps_reverse_gain_to_risk() {
+        let (book, config) = launch_plan_test_fixture();
+        let root = std::env::temp_dir().join(format!(
+            "asolaria-100b-registry-fixture-{}",
+            unix_seconds()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(REAL_100B_CHECKPOINT_FILE),
+            r#"{"processedPackets":200,"targetPackets":200,"completedChunks":2,"lastPacketPid":"BH.REAL100B.OPENCODE.PID.000000000200","status":"REAL_100B_PID_PACKET_RUN_COMPLETE"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(REAL_100B_CHUNKS_FILE),
+            concat!(
+                r#"{"chunk":0,"packets":100,"geniusHits":91,"mistakeHits":9,"avgScore":0.91,"avgReverseGain":0.775,"chunkHash":"aaa111"}"#,
+                "\n",
+                r#"{"chunk":1,"packets":100,"geniusHits":80,"mistakeHits":20,"avgScore":0.80,"avgReverseGain":0.720,"chunkHash":"bbb222"}"#,
+                "\n"
+            ),
+        )
+        .unwrap();
+
+        let query = format!(
+            "target=200&batch=100&sample=1&device=acer&ts=1750000000&score=800&risk=10&registry={}",
+            root.to_string_lossy()
+        );
+        let out = render_replay_prep(&book, &config, 0, &query);
+        assert!(out.contains("HOST8REGISTRY|loaded=1"));
+        assert!(out.contains("checkpoint_processed=200"));
+        assert!(out.contains("checkpoint_target=200"));
+        assert!(out.contains("checkpoint_completed_chunks=2"));
+        assert!(out.contains("chunks_loaded=2"));
+        assert!(out.contains("packets_loaded=200"));
+        assert!(out.contains("genius_hits=171"));
+        assert!(out.contains("mistake_hits=29"));
+        assert!(out.contains("avg_score_q=855"));
+        // weighted avgReverseGain = 0.7475 -> q 748; reverse_risk = 1 - 0.7475 -> q 253.
+        assert!(out.contains("avg_reverse_gain_q=748"));
+        assert!(out.contains("reverse_risk_q=253"));
+        assert!(out.contains("promote_chunks=2"));
+        assert!(out.contains("hold_chunks=0"));
+        assert!(out.contains("checkpoint_complete=1"));
+        assert!(out.contains("packet_complete=1"));
+        assert!(out.contains("chunks_complete=1"));
+        assert!(out.contains("registry_status=READY_DRY_REPLAY"));
+        assert!(out.contains("reverse_risk_mapping=one_minus_reverse_gain"));
+        assert!(out.contains("process_launch=0"));
+        assert!(out.contains("auto_fire_allowed=0"));
+        assert!(out.contains("json=0"));
+        assert!(!out.contains('{'));
+        assert!(!out.contains('}'));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reverse_gain_to_reverse_risk_mapping_matches_omniflywheel_gate() {
+        assert_eq!(reverse_risk_q_from_reverse_gain(0.775), 225);
+        assert_eq!(reverse_risk_q_from_reverse_gain(0.720), 280);
+        assert_eq!(reverse_risk_q_from_reverse_gain(0.719), 281);
     }
 }
