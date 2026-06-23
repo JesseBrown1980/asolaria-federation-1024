@@ -1,0 +1,130 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Asolaria Recall + Atlas · ACER (Rust)</title>
+<!--
+  Served same-origin BY the Rust recall-serve engine at / — so the relative /api calls are
+  piped with no CORS. Layout absorbed from the liris Recall+Atlas surface; ACER-branded;
+  the .hbp/.hbi corpus stays private. Atlas links point at the :4790 maps server.
+-->
+<style>
+body{margin:0;background:#0b0d10;color:#e9edf2;font:14px/1.4 system-ui,Segoe UI,Arial,sans-serif}
+header{padding:18px 22px;border-bottom:1px solid #28313b;background:#10151b;display:flex;gap:18px;align-items:flex-start;justify-content:space-between}
+h1{margin:0;font-size:20px;letter-spacing:0}
+.tag{color:#9fd3ff}.warn{color:#ffd28a}.ok{color:#95f0aa}
+main{display:grid;grid-template-columns:360px 1fr;gap:0;min-height:calc(100vh - 79px)}
+aside{border-right:1px solid #28313b;padding:18px;overflow:auto}
+section{padding:18px;overflow:auto}
+a{color:#9fd3ff}input{width:100%;box-sizing:border-box;background:#111820;color:#f5f7fa;border:1px solid #314151;padding:10px;border-radius:6px}
+button{background:#1f6feb;color:#fff;border:0;border-radius:6px;padding:9px 11px;margin-top:8px;cursor:pointer}
+pre{white-space:pre-wrap;word-break:break-word;background:#05070a;border:1px solid #28313b;border-radius:6px;padding:12px;min-height:240px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:14px 0}
+.stat{background:#111820;border:1px solid #263442;border-radius:6px;padding:10px}
+.small{font-size:12px;color:#a8b3bf}
+.auth{border:1px solid #314151;border-radius:6px;padding:10px;margin:12px 0;background:#0e141b}
+.auth input{margin-top:6px}
+</style>
+<header>
+  <div><h1>Asolaria Recall + Atlas · ACER <span class="ok" style="font-size:12px">(Rust · piped)</span></h1><div class="small">acer recall served by the Rust 8-byte engine · layout absorbed from liris</div></div>
+  <div class="small">Evidence: <span class="ok">ACER MEASURED</span> · Remote: <span class="warn">shared-key gated</span></div>
+</header>
+<main>
+<aside>
+  <b>3D Atlas</b>
+  <p><a target="_blank" href="http://127.0.0.1:4790/asolaria-unified-fabric-map.html">Unified Fabric Map (migration manifest)</a></p>
+  <p><a target="_blank" href="http://127.0.0.1:4790/asolaria-multi-cylinder-v2.html">Multi-Cylinder Fabric v2 (81,434 surfaces)</a></p>
+  <p><a target="_blank" href="http://127.0.0.1:4790/acer-scientific-voxel-atlas.html">Scientific 3D Voxel Atlas (726 PIDs)</a></p>
+  <p><a target="_blank" href="http://127.0.0.1:4790/asolaria-real-model.html">Real Model (967-pt prime cylinder)</a></p>
+  <b>Recall Summary</b>
+  <div class="grid">
+    <div class="stat"><span class="tag">rows</span><br><span id="s-rows">—</span></div>
+    <div class="stat"><span class="tag">terms</span><br><span id="s-terms">—</span></div>
+    <div class="stat"><span class="tag">postings</span><br><span id="s-post">—</span></div>
+    <div class="stat"><span class="tag">skipped</span><br><span id="s-skip">—</span></div>
+  </div>
+  <p class="small">This page serves local bytes. Remote access requires HMAC + owner PID. The engine is publishable; the HBP/HBI corpus stays private.</p>
+  <p class="small">Access levels: <span class="ok">0 public</span> · <span class="tag">5 federation</span> · <span class="warn">9 owner-private</span>. PII rules win before public-canon rules; L0 is provably PII-free.</p>
+  <p class="small">Keyed acer↔liris links (Jesse + Rayssa) share all levels incl PII by consent; third parties get L0 only.</p>
+  <div class="auth">
+    <b>Remote Colony Login</b>
+    <p class="small">For LAN/browser use from another trusted machine. The key signs HMAC locally in this page; it is never sent as a raw key.</p>
+    <input id="owner" placeholder="Owner PID" value="OP-JESSE-PID">
+    <input id="host" placeholder="Calling colony" value="acer">
+    <input id="secret" placeholder="Shared key" type="password">
+    <button onclick="saveAuth()">Save Local Login</button>
+    <button onclick="clearAuth()">Clear</button>
+    <div id="authState" class="small"></div>
+  </div>
+  <label>Search path / PID / identity / metric</label>
+  <input id="q" value="significance">
+  <label class="small">Requested access level</label>
+  <input id="level" value="0">
+  <button onclick="publicSearch()">Search Public L0</button>
+  <button onclick="search()">Search Local</button>
+  <button onclick="randomRow()">Random Seek</button>
+</aside>
+<section>
+  <pre id="out">Ready (Rust engine, same-origin /api). Try "significance", "brown-hilbert", "mcp", or paste a pid/bh value.</pre>
+</section>
+</main>
+<script>
+const enc = new TextEncoder();
+function isLoopback(){ return ['127.0.0.1','localhost','::1'].includes(location.hostname); }
+function loadAuth(){
+  document.getElementById('owner').value = localStorage.getItem('asolaria.recall.owner') || document.getElementById('owner').value;
+  document.getElementById('host').value = localStorage.getItem('asolaria.recall.host') || document.getElementById('host').value;
+  document.getElementById('secret').value = sessionStorage.getItem('asolaria.recall.key') || '';
+  renderAuthState();
+}
+function saveAuth(){
+  localStorage.setItem('asolaria.recall.owner', document.getElementById('owner').value.trim());
+  localStorage.setItem('asolaria.recall.host', document.getElementById('host').value.trim());
+  sessionStorage.setItem('asolaria.recall.key', document.getElementById('secret').value);
+  renderAuthState();
+}
+function clearAuth(){
+  sessionStorage.removeItem('asolaria.recall.key');
+  document.getElementById('secret').value = '';
+  renderAuthState();
+}
+function renderAuthState(){
+  const has = Boolean(sessionStorage.getItem('asolaria.recall.key') || document.getElementById('secret').value);
+  document.getElementById('authState').textContent = isLoopback()
+    ? 'Loopback UI is open. Remote HMAC login optional for peer calls.'
+    : (has ? 'HMAC login loaded for this tab.' : 'Remote search needs the shared key in this tab.');
+}
+function hex(bytes){ return [...new Uint8Array(bytes)].map(b=>b.toString(16).padStart(2,'0')).join(''); }
+function concat(parts){ const len=parts.reduce((n,p)=>n+p.length,0); const out=new Uint8Array(len); let o=0; for(const p of parts){out.set(p,o);o+=p.length;} return out; }
+function u64be(n){ const b=new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt(n), false); return b; }
+async function authHeaders(verb){
+  if (isLoopback() && !sessionStorage.getItem('asolaria.recall.key') && !document.getElementById('secret').value) return {};
+  const key = sessionStorage.getItem('asolaria.recall.key') || document.getElementById('secret').value;
+  const owner = document.getElementById('owner').value.trim();
+  const host = document.getElementById('host').value.trim();
+  if (!key || !owner || !host) throw new Error('Remote search needs owner PID, colony, and shared key.');
+  const nonce = hex(crypto.getRandomValues(new Uint8Array(16)));
+  const ts = Math.floor(Date.now()/1000);
+  const msg = concat([enc.encode('LINK|'),enc.encode(owner),enc.encode('|'),enc.encode(host),enc.encode('|'),enc.encode(verb),enc.encode('|'),enc.encode(nonce),enc.encode('|'),u64be(ts)]);
+  const k = await crypto.subtle.importKey('raw', enc.encode(key), {name:'HMAC',hash:'SHA-256'}, false, ['sign']);
+  const mac = await crypto.subtle.sign('HMAC', k, msg);
+  return {'X-Asolaria-Owner-PID':owner,'X-Asolaria-Colony':host,'X-Asolaria-Verb':verb,'X-Asolaria-Nonce':nonce,'X-Asolaria-TS':String(ts),'X-Asolaria-HMAC':hex(mac)};
+}
+async function show(url, verb){ try{ const r=await fetch(url,{headers:await authHeaders(verb)}); document.getElementById('out').textContent=await r.text(); }catch(err){ document.getElementById('out').textContent=String(err&&err.message||err); } }
+async function showOpen(url){ try{ const r=await fetch(url); document.getElementById('out').textContent=await r.text(); }catch(err){ document.getElementById('out').textContent=String(err&&err.message||err); } }
+function requestedLevel(){ return document.getElementById('level').value || '0'; }
+async function publicSearch(){ const q=document.getElementById('q').value; await showOpen('/api/public/search?q='+encodeURIComponent(q)+'&level=0'); }
+async function search(){ const q=document.getElementById('q').value; await show('/api/search?q='+encodeURIComponent(q)+'&level='+encodeURIComponent(requestedLevel()), 'search'); }
+async function randomRow(){ await showOpen('/api/public/search?q=&level=0&limit=1'); }
+(async function(){
+  try {
+    const h = await (await fetch('/api/health')).json();
+    const si = h.search_index || {};
+    const fmt = n => (n==null?'—':Number(n).toLocaleString('en-US'));
+    document.getElementById('s-rows').textContent = fmt(h.rows);
+    document.getElementById('s-terms').textContent = fmt(si.terms);
+    document.getElementById('s-post').textContent = fmt(si.postings);
+    document.getElementById('s-skip').textContent = fmt(si.skipped);
+  } catch (e) {}
+})();
+loadAuth();
+</script>

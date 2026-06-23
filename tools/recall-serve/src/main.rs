@@ -37,6 +37,9 @@ const MAX_REFS_PER_TERM: usize = 20000;
 const MAX_ROW_LEN: u64 = 4 * 1024 * 1024; // fail-closed bound on a single .hbp row read
 const MAX_CONN: usize = 64; // bounded concurrency; excess -> 503
 
+// Pixels-first portal served at `/` (Recall+Atlas dashboard, layout absorbed from liris).
+const ATLAS_HTML: &str = include_str!("atlas.html");
+
 // Extracted verbatim from serve-recall.cjs (drift-proof, not hand-typed).
 const PII_PATH_FRAGMENTS: &[&str] = &[
     "legal",
@@ -621,9 +624,12 @@ fn query_param(query: &str, key: &str) -> String {
     String::new()
 }
 fn respond(s: &mut TcpStream, status: &str, ctype: &str, body: &str) {
+    // Permissive CORS: trusted-LAN portal; the public tier is open and the authenticated
+    // tier still requires a valid HMAC (CORS does not bypass it), so the .hbp/.hbi corpus
+    // is never exposed by this header. Lets the :4790-served dashboard reach this engine.
     let _ = write!(
         s,
-        "HTTP/1.1 {}\r\ncontent-type: {}\r\ncontent-length: {}\r\ncache-control: no-store\r\nconnection: close\r\n\r\n{}",
+        "HTTP/1.1 {}\r\ncontent-type: {}\r\ncontent-length: {}\r\naccess-control-allow-origin: *\r\ncache-control: no-store\r\nconnection: close\r\n\r\n{}",
         status, ctype, body.len(), body
     );
 }
@@ -716,6 +722,12 @@ fn handle(mut s: TcpStream, cfg: Arc<Cfg>, idx: Arc<Index>) {
             search_response(&cfg.colony, mode, &q, max_level, cc, &hits)
         }
         "/" => {
+            // Pixels-first portal: the Recall+Atlas dashboard, served same-origin so its
+            // /api calls are piped with no CORS. Layout absorbed from liris (bilateral exchange).
+            respond(&mut s, "200 OK", "text/html; charset=utf-8", ATLAS_HTML);
+            return;
+        }
+        "/status" => {
             respond(
                 &mut s,
                 "200 OK",
