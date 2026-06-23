@@ -72,22 +72,38 @@ WhiteRoom, OmniShannon, Shannon, and Omniflywheel recirculation. A clean aggrega
 - `cargo fmt`: not available on Liris (`rustfmt` component missing).
 - `cargo check` / `cargo test`: blocked on Liris because MSVC `link.exe` is not installed.
 
-## Acer verification required
+## Acer verification
 
-Run on Acer/MSVC against the real registry:
+Initial required command set:
 
 ```text
 cargo test -p asolaria-host8-serve
 GET /replay-prep.hbp?...&registry=C:/Users/acer/Asolaria/data/neurotech-defense-lab/real-agents/100b-run/
 ```
 
-Expected real-run signal if the registry matches the scouted shape:
+OPERATOR_OBSERVED / Acer-measured follow-up on the PR #6 worktree:
 
-- checkpoint processed/target: `100000000000`
-- chunks: `100000`
-- `real_100b_chunk + real_100b_accelerated_chunk = 100000`
-- packets loaded: `100000000000`
-- reverse risk around `225` when avgReverseGain is about `0.775`
+- `cargo test -p asolaria-host8-serve`: `26 passed; 0 failed` after the rounding-boundary fix.
+- The fixture's weighted `avgReverseGain = 0.7475` resolves as `reverse_risk_q=252` on Acer/MSVC
+  (`1 - 0.7475` becomes `0.2524999..` in f64, then `.round()` -> `252`). This supersedes the
+  hand-computed `253` expectation.
+- Acer ground-truth oracle over the real registry:
+  - chunks: `100000`
+  - `real_100b_chunk = 1968`
+  - `real_100b_accelerated_chunk = 98032`
+  - other chunk kinds: `0`
+  - packets: `100000000000`
+  - aggregate chunk gate: `PROCEED` for `100000`, `HOLD` for `0`
+  - checkpoint cross-checks match exactly:
+    - `sum_packets = 100000000000`
+    - `sum_genius = 277800007`
+    - `sum_mistake = 111103104`
+- Honest nuance from proof samples: packet-level samples include both `PROCEED` and `HOLD`
+  (`10/15` proceed, `5/15` hold in the cited Acer run). Held packets are compacted/never-deleted;
+  they are not spawned. Aggregate chunk readiness must not erase packet-level variance.
+
+Still true after Acer proof:
+
 - `auto_fire_allowed=0`
 - `process_launch=0`
 - `HOST8PIPELINE|...|pipeline_verified=0|status=SUPERVISOR_PIPELINE_REQUIRED`

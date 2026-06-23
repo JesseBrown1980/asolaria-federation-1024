@@ -2280,9 +2280,10 @@ mod tests {
         assert!(out.contains("genius_hits=171"));
         assert!(out.contains("mistake_hits=29"));
         assert!(out.contains("avg_score_q=855"));
-        // weighted avgReverseGain = 0.7475 -> q 748; reverse_risk = 1 - 0.7475 -> q 253.
+        // weighted avgReverseGain = 0.7475 -> q 748; reverse_risk = 1 - 0.7475 =
+        // 0.2524999.. in f64 -> round -> 252 on Acer/MSVC. 748+252=1000.
         assert!(out.contains("avg_reverse_gain_q=748"));
-        assert!(out.contains("reverse_risk_q=253"));
+        assert!(out.contains("reverse_risk_q=252"));
         assert!(out.contains("promote_chunks=2"));
         assert!(out.contains("hold_chunks=0"));
         assert!(out.contains("scalar_gate_clean=1"));
