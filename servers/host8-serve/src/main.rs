@@ -1383,6 +1383,9 @@ struct RegistryReplayStats {
     checkpoint_last_pid: String,
     chunks_seen: u128,
     chunks_loaded: u128,
+    real_chunks: u128,
+    accelerated_chunks: u128,
+    other_chunks: u128,
     chunks_malformed: u128,
     packets_loaded: u128,
     genius_hits: u128,
@@ -1538,6 +1541,12 @@ fn load_100b_registry_stats(registry_dir: &str, chunk_limit: Option<u128>) -> Re
         }
         let avg_score = avg_score.unwrap();
         let avg_reverse_gain = avg_reverse_gain.unwrap();
+        let kind = json_string_field(line, "kind").unwrap_or_else(|| "missing".to_string());
+        match kind.as_str() {
+            "real_100b_chunk" => stats.real_chunks += 1,
+            "real_100b_accelerated_chunk" => stats.accelerated_chunks += 1,
+            _ => stats.other_chunks += 1,
+        }
         let genius = json_u128_field(line, "geniusHits").unwrap_or(0);
         let mistake = json_u128_field(line, "mistakeHits").unwrap_or(0);
         let chunk_hash = json_string_field(line, "chunkHash").unwrap_or_else(|| "-".to_string());
@@ -1650,15 +1659,16 @@ fn render_replay_prep(book: &SeatBook, config: &Config, gnn_score_q: u32, query:
             stats.checkpoint_target > 0 && stats.packets_loaded >= stats.checkpoint_target;
         let chunks_complete = stats.checkpoint_completed_chunks > 0
             && stats.chunks_loaded >= stats.checkpoint_completed_chunks;
+        let scalar_gate_clean = stats.loaded && stats.hold_chunks == 0;
         let registry_status = if !stats.error.is_empty() {
             "LOAD_ERROR"
-        } else if checkpoint_complete && packet_complete && chunks_complete && stats.hold_chunks == 0 {
-            "READY_DRY_REPLAY"
+        } else if checkpoint_complete && packet_complete && chunks_complete && scalar_gate_clean {
+            "SCALAR_GATE_READY_SUPERVISOR_PIPELINE_REQUIRED"
         } else {
             "REVIEW_REQUIRED"
         };
         out.push_str(&format!(
-            "HOST8REGISTRY|loaded={}|path_sha16={}|checkpoint_processed={}|checkpoint_target={}|checkpoint_completed_chunks={}|checkpoint_status={}|last_packet_pid={}|chunks_seen={}|chunks_loaded={}|chunks_malformed={}|packets_loaded={}|genius_hits={}|mistake_hits={}|avg_score_q={}|avg_reverse_gain_q={}|reverse_risk_q={}|promote_chunks={}|hold_chunks={}|checkpoint_complete={}|packet_complete={}|chunks_complete={}|registry_status={}|error={}|first_chunk_hash={}|last_chunk_hash={}|reverse_risk_mapping=one_minus_reverse_gain|process_launch=0|auto_fire_allowed=0|json=0\n",
+            "HOST8REGISTRY|loaded={}|path_sha16={}|checkpoint_processed={}|checkpoint_target={}|checkpoint_completed_chunks={}|checkpoint_status={}|last_packet_pid={}|chunks_seen={}|chunks_loaded={}|real_chunks={}|accelerated_chunks={}|other_chunks={}|chunks_malformed={}|packets_loaded={}|genius_hits={}|mistake_hits={}|avg_score_q={}|avg_reverse_gain_q={}|reverse_risk_q={}|promote_chunks={}|hold_chunks={}|scalar_gate_clean={}|checkpoint_complete={}|packet_complete={}|chunks_complete={}|registry_status={}|error={}|first_chunk_hash={}|last_chunk_hash={}|reverse_risk_mapping=one_minus_reverse_gain|accepted_chunk_kinds=real_100b_chunk,real_100b_accelerated_chunk|process_launch=0|auto_fire_allowed=0|json=0\n",
             if stats.loaded { 1 } else { 0 },
             hbp_escape(&stats.path_sha16),
             stats.checkpoint_processed,
@@ -1668,6 +1678,9 @@ fn render_replay_prep(book: &SeatBook, config: &Config, gnn_score_q: u32, query:
             hbp_escape(&stats.checkpoint_last_pid),
             stats.chunks_seen,
             stats.chunks_loaded,
+            stats.real_chunks,
+            stats.accelerated_chunks,
+            stats.other_chunks,
             stats.chunks_malformed,
             stats.packets_loaded,
             stats.genius_hits,
@@ -1677,6 +1690,7 @@ fn render_replay_prep(book: &SeatBook, config: &Config, gnn_score_q: u32, query:
             reverse_risk_q,
             stats.promote_chunks,
             stats.hold_chunks,
+            if scalar_gate_clean { 1 } else { 0 },
             if checkpoint_complete { 1 } else { 0 },
             if packet_complete { 1 } else { 0 },
             if chunks_complete { 1 } else { 0 },
@@ -1685,6 +1699,7 @@ fn render_replay_prep(book: &SeatBook, config: &Config, gnn_score_q: u32, query:
             hbp_escape(&stats.first_chunk_hash),
             hbp_escape(&stats.last_chunk_hash),
         ));
+        out.push_str("HOST8PIPELINE|required=gnn,hookwall,reverse_gain_gnn,whiteroom,omnishannon,shannon,omniflywheel|scalar_projection=1|pipeline_verified=0|status=SUPERVISOR_PIPELINE_REQUIRED|process_launch=0|auto_fire_allowed=0|json=0\n");
     } else {
         out.push_str(
             "HOST8REGISTRY|loaded=0|registry_status=NOT_REQUESTED|process_launch=0|auto_fire_allowed=0|json=0\n",
@@ -2240,9 +2255,9 @@ mod tests {
         std::fs::write(
             root.join(REAL_100B_CHUNKS_FILE),
             concat!(
-                r#"{"chunk":0,"packets":100,"geniusHits":91,"mistakeHits":9,"avgScore":0.91,"avgReverseGain":0.775,"chunkHash":"aaa111"}"#,
+                r#"{"kind":"real_100b_chunk","chunk":0,"packets":100,"geniusHits":91,"mistakeHits":9,"avgScore":0.91,"avgReverseGain":0.775,"chunkHash":"aaa111"}"#,
                 "\n",
-                r#"{"chunk":1,"packets":100,"geniusHits":80,"mistakeHits":20,"avgScore":0.80,"avgReverseGain":0.720,"chunkHash":"bbb222"}"#,
+                r#"{"kind":"real_100b_accelerated_chunk","accelerationMode":"chunk_aggregate_sparse_proof","chunk":1,"packets":100,"geniusHits":80,"mistakeHits":20,"avgScore":0.80,"avgReverseGain":0.720,"chunkHash":"bbb222"}"#,
                 "\n"
             ),
         )
@@ -2258,6 +2273,9 @@ mod tests {
         assert!(out.contains("checkpoint_target=200"));
         assert!(out.contains("checkpoint_completed_chunks=2"));
         assert!(out.contains("chunks_loaded=2"));
+        assert!(out.contains("real_chunks=1"));
+        assert!(out.contains("accelerated_chunks=1"));
+        assert!(out.contains("other_chunks=0"));
         assert!(out.contains("packets_loaded=200"));
         assert!(out.contains("genius_hits=171"));
         assert!(out.contains("mistake_hits=29"));
@@ -2267,11 +2285,17 @@ mod tests {
         assert!(out.contains("reverse_risk_q=253"));
         assert!(out.contains("promote_chunks=2"));
         assert!(out.contains("hold_chunks=0"));
+        assert!(out.contains("scalar_gate_clean=1"));
         assert!(out.contains("checkpoint_complete=1"));
         assert!(out.contains("packet_complete=1"));
         assert!(out.contains("chunks_complete=1"));
-        assert!(out.contains("registry_status=READY_DRY_REPLAY"));
+        assert!(out.contains("registry_status=SCALAR_GATE_READY_SUPERVISOR_PIPELINE_REQUIRED"));
         assert!(out.contains("reverse_risk_mapping=one_minus_reverse_gain"));
+        assert!(out.contains("accepted_chunk_kinds=real_100b_chunk,real_100b_accelerated_chunk"));
+        assert!(out.contains("HOST8PIPELINE|"));
+        assert!(out.contains("required=gnn,hookwall,reverse_gain_gnn,whiteroom,omnishannon,shannon,omniflywheel"));
+        assert!(out.contains("pipeline_verified=0"));
+        assert!(out.contains("status=SUPERVISOR_PIPELINE_REQUIRED"));
         assert!(out.contains("process_launch=0"));
         assert!(out.contains("auto_fire_allowed=0"));
         assert!(out.contains("json=0"));

@@ -31,15 +31,30 @@ wave") onto the Rust gate contract:
 - `OMNIFLYWHEEL_MAX_REVERSE_RISK = 0.28`
 - spawn gate quantized parity: `score_q >= 720 && reverse_risk_q <= 280`
 
+The loader accepts both registry chunk modes:
+
+- `real_100b_chunk` (full-detail early/window chunks)
+- `real_100b_accelerated_chunk` (bulk `chunk_aggregate_sparse_proof` chunks)
+
+This preserves the 2000-resident-bound / gulp / sparse-proof architecture: the first roughly
+2000 full-detail chunks and the accelerated bulk together form the 100,000-chunk / 100B-packet
+run. Filtering only `real_100b_chunk` is a deflation bug.
+
 ## Output
 
 The route still emits the existing `HOST8REPLAYPREP` dry gate line, then adds:
 
 ```text
-HOST8REGISTRY|loaded=...|checkpoint_processed=...|checkpoint_target=...|chunks_loaded=...|packets_loaded=...|avg_score_q=...|avg_reverse_gain_q=...|reverse_risk_q=...|promote_chunks=...|hold_chunks=...|registry_status=...|reverse_risk_mapping=one_minus_reverse_gain|process_launch=0|auto_fire_allowed=0|json=0
+HOST8REGISTRY|loaded=...|checkpoint_processed=...|checkpoint_target=...|chunks_loaded=...|real_chunks=...|accelerated_chunks=...|packets_loaded=...|avg_score_q=...|avg_reverse_gain_q=...|reverse_risk_q=...|promote_chunks=...|hold_chunks=...|scalar_gate_clean=...|registry_status=...|reverse_risk_mapping=one_minus_reverse_gain|accepted_chunk_kinds=real_100b_chunk,real_100b_accelerated_chunk|process_launch=0|auto_fire_allowed=0|json=0
+HOST8PIPELINE|required=gnn,hookwall,reverse_gain_gnn,whiteroom,omnishannon,shannon,omniflywheel|scalar_projection=1|pipeline_verified=0|status=SUPERVISOR_PIPELINE_REQUIRED|process_launch=0|auto_fire_allowed=0|json=0
 ```
 
 No raw packet bodies are emitted. The path is represented only by `path_sha16`.
+
+Important: `reverse_risk = 1 - avgReverseGain` is only the scalar projection into the Rust gate.
+It does not replace the required supervisor pipeline: forward GNN, hookwall, reverse-gain GNN,
+WhiteRoom, OmniShannon, Shannon, and Omniflywheel recirculation. A clean aggregate can only report
+`SCALAR_GATE_READY_SUPERVISOR_PIPELINE_REQUIRED`, not live-run readiness.
 
 ## Safety boundary
 
@@ -70,8 +85,9 @@ Expected real-run signal if the registry matches the scouted shape:
 
 - checkpoint processed/target: `100000000000`
 - chunks: `100000`
+- `real_100b_chunk + real_100b_accelerated_chunk = 100000`
 - packets loaded: `100000000000`
 - reverse risk around `225` when avgReverseGain is about `0.775`
 - `auto_fire_allowed=0`
 - `process_launch=0`
-
+- `HOST8PIPELINE|...|pipeline_verified=0|status=SUPERVISOR_PIPELINE_REQUIRED`
