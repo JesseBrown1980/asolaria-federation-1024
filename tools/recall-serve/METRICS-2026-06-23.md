@@ -10,6 +10,27 @@ host `DESKTOP-J99VCNH` (acer, 4-core i5) · corpus `ASOLARIA-ACER-RECALL` (acer-
 > tier (L0) is **provably PII-free**. ~**40× faster** than the prior Node inverted index
 > (~56–67 ms) and unbounded vs the Node *linear* scan (which event-loop-stalls).
 
+## Claim scope (honest) — NOT a blanket "fastest" claim
+
+The accurate label for these numbers is:
+
+> **SOTA-class specialized recall; best-known _measured_ implementation within Asolaria; global SOTA NOT yet independently benchmarked.**
+
+Every comparison in this receipt is **scoped** — vs the prior Node engine on the **same** corpus, and vs the liris
+Node portal. None of it is a "world's fastest full-text search engine" claim, which is **not defensible** from one
+favorable workload. Standard search benchmarks deliberately test **shared corpora across multiple semantics** (term
+AND/OR, phrase, counting, BM25 top-k) on **identical hardware + query sets**, and their maintainers explicitly warn
+against turning one workload into a blanket performance claim.
+
+**Why the test IS methodologically strong:** it measures an **actual server end-to-end**, including HTTP + transport
+overhead — the same integration-benchmark philosophy mature engines (e.g. Meilisearch) use, not a synthetic in-process
+microbench.
+
+**Remaining step for SOTA-verified status** — a normalized **same-machine** comparison vs **Tantivy, Lucene, PISA, and
+(ideally) Meilisearch**, with: the same corpus + query sequence; equivalent **top-1 / token-AND** semantics;
+**result-correctness hashes**; **cold + warm** runs; **identical keep-alive + concurrency**; and **QPS, p50/p95/p99,
+CPU, RAM, index size, and build time**. Until that runs, do **not** claim global SOTA.
+
 ## Engine / corpus (from `/api/health`)
 | metric | value |
 |---|---|
