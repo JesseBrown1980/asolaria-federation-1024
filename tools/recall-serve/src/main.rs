@@ -4,20 +4,24 @@
 //! corpus: one `fs.readSync`-heavy query blocks the single event loop so EVERY
 //! route — `/api/health` included — times out. This serves the SAME `.hbp/.hbi`
 //! corpus with the HILBRA-IDX-BEHCS-TUPLE-TEXT-V1 inverted index (term→postings,
-//! pid/bh exact maps, precomputed levels) on a thread-per-connection server:
-//! query = token lookup → small candidate set → O(1) seek → level-filter, in
-//! tens of ms, and a slow query never blocks another.
+//! pid/bh exact maps, precomputed levels) on a bounded thread pool: query = token
+//! lookup → small candidate set → O(1) seek → level-filter, in tens of ms, and a
+//! slow query never blocks another.
 //!
-//! Parity-faithful to serve-recall.cjs / serve-recall-indexed.cjs (tokenizer,
-//! level classification, HMAC, response shape). Fragment lists extracted from the
-//! `.cjs` (drift-proof). Corpus is read-only and NEVER published; the key is read
-//! from a file and never logged. No fire, no mint, no write.
+//! Parity + fail-closed (post ChatGPT-Pro/liris review): per-owner grants cap the
+//! requested level; pid/bh keep the LAST duplicate (Node Map.set); failed/oversized
+//! rows fail CLOSED to owner-private and are counted; the index refuses to serve
+//! ok:true if the corpus did not load; connection concurrency is bounded.
+//!
+//! Corpus is read-only and NEVER published; the key is read from a file and never
+//! logged. No fire, no mint, no write.
 
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use std::{env, thread};
@@ -30,6 +34,8 @@ const TERM_MIN: usize = 2;
 const TERM_MAX: usize = 64;
 const MAX_TERMS_PER_ROW: usize = 96;
 const MAX_REFS_PER_TERM: usize = 20000;
+const MAX_ROW_LEN: u64 = 4 * 1024 * 1024; // fail-closed bound on a single .hbp row read
+const MAX_CONN: usize = 64; // bounded concurrency; excess -> 503
 
 // Extracted verbatim from serve-recall.cjs (drift-proof, not hand-typed).
 const PII_PATH_FRAGMENTS: &[&str] = &[
@@ -115,11 +121,13 @@ struct Entry {
 }
 
 struct Index {
+    ok: bool,
     entries: Vec<Entry>,
     term_map: HashMap<String, Vec<u32>>,
     by_pid: HashMap<String, u32>,
     by_bh: HashMap<String, u32>,
     postings: u64,
+    skipped: u64, // rows that failed/oversized -> failed CLOSED to owner-private
     build_ms: u128,
 }
 
@@ -131,6 +139,7 @@ struct Cfg {
     hbp: String,
     key: String,
     allowed_owner_pids: Vec<String>,
+    grants: HashMap<String, i64>,
     peers: Vec<(String, String)>,
 }
 
@@ -139,6 +148,10 @@ fn env_or(k: &str, d: &str) -> String {
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| d.to_string())
+}
+
+fn clamp_level(v: i64) -> i64 {
+    v.clamp(LEVEL_PUBLIC, LEVEL_OWNER_PRIVATE)
 }
 
 // ── HBI row-offset parse ─────────────────────────────────────────────────────
@@ -176,15 +189,16 @@ fn parse_idx(line: &str) -> Option<Entry> {
     })
 }
 
-fn seek_row_f(f: &mut File, off: u64, len: u64) -> String {
-    if f.seek(SeekFrom::Start(off)).is_err() {
-        return String::new();
+/// Read a row, fail-closed: returns None on read error OR oversize len (bounded
+/// allocation). Callers that get None classify owner-private and count it.
+fn seek_row_opt(f: &mut File, off: u64, len: u64) -> Option<String> {
+    if len == 0 || len > MAX_ROW_LEN {
+        return None;
     }
+    f.seek(SeekFrom::Start(off)).ok()?;
     let mut buf = vec![0u8; len as usize];
-    if f.read_exact(&mut buf).is_err() {
-        return String::new();
-    }
-    String::from_utf8_lossy(&buf).trim_end().to_string()
+    f.read_exact(&mut buf).ok()?;
+    Some(String::from_utf8_lossy(&buf).trim_end().to_string())
 }
 
 // ── tokenizer (parity with serve-recall.cjs tokenize) ────────────────────────
@@ -290,49 +304,72 @@ fn assign_level(path: &str, content: &str) -> i64 {
     LEVEL_FEDERATION
 }
 
-// ── inverted index build ─────────────────────────────────────────────────────
+// ── inverted index build (fail-closed) ───────────────────────────────────────
 fn build_index(hbi: &str, hbp: &str) -> Index {
     let t0 = Instant::now();
     let mut entries: Vec<Entry> = Vec::new();
-    if let Ok(f) = File::open(hbi) {
-        for line in BufReader::new(f).lines().map_while(Result::ok) {
-            if line.starts_with("IDX|") {
-                if let Some(e) = parse_idx(&line) {
-                    entries.push(e);
+    let hbi_ok = match File::open(hbi) {
+        Ok(f) => {
+            for line in BufReader::new(f).lines().map_while(Result::ok) {
+                if line.starts_with("IDX|") {
+                    if let Some(e) = parse_idx(&line) {
+                        entries.push(e);
+                    }
                 }
             }
+            true
         }
-    }
+        Err(_) => false,
+    };
     let mut term_map: HashMap<String, Vec<u32>> = HashMap::new();
     let mut by_pid: HashMap<String, u32> = HashMap::new();
     let mut by_bh: HashMap<String, u32> = HashMap::new();
     let mut postings: u64 = 0;
-    if let Ok(mut hf) = File::open(hbp) {
-        for (i, e) in entries.iter_mut().enumerate() {
-            let row = seek_row_f(&mut hf, e.off, e.len);
-            e.level = assign_level(&e.path, &row);
-            if !e.pid.is_empty() {
-                by_pid.entry(e.pid.clone()).or_insert(i as u32);
-            }
-            if !e.bh.is_empty() {
-                by_bh.entry(e.bh.to_lowercase()).or_insert(i as u32);
-            }
-            let toks = unique_tokens(&[&e.pid, &e.bh, &e.path, &row], MAX_TERMS_PER_ROW);
-            for t in toks {
-                let refs = term_map.entry(t).or_default();
-                if refs.len() < MAX_REFS_PER_TERM {
-                    refs.push(i as u32);
+    let mut skipped: u64 = 0;
+    let hbp_ok = match File::open(hbp) {
+        Ok(mut hf) => {
+            for (i, e) in entries.iter_mut().enumerate() {
+                let (row, level) = match seek_row_opt(&mut hf, e.off, e.len) {
+                    Some(r) => {
+                        let lvl = assign_level(&e.path, &r);
+                        (r, lvl)
+                    }
+                    None => {
+                        // fail CLOSED: unreadable/oversized row -> owner-private, never public.
+                        skipped += 1;
+                        (String::new(), LEVEL_OWNER_PRIVATE)
+                    }
+                };
+                e.level = level;
+                // Node Map.set keeps the LAST duplicate -> insert (overwrite).
+                if !e.pid.is_empty() {
+                    by_pid.insert(e.pid.clone(), i as u32);
                 }
-                postings += 1; // count every (term,row) attempt (parity with Node's stat)
+                if !e.bh.is_empty() {
+                    by_bh.insert(e.bh.to_lowercase(), i as u32);
+                }
+                let toks = unique_tokens(&[&e.pid, &e.bh, &e.path, &row], MAX_TERMS_PER_ROW);
+                for t in toks {
+                    let refs = term_map.entry(t).or_default();
+                    if refs.len() < MAX_REFS_PER_TERM {
+                        refs.push(i as u32);
+                    }
+                    postings += 1;
+                }
             }
+            true
         }
-    }
+        Err(_) => false,
+    };
+    let ok = hbi_ok && hbp_ok && !entries.is_empty();
     Index {
+        ok,
         entries,
         term_map,
         by_pid,
         by_bh,
         postings,
+        skipped,
         build_ms: t0.elapsed().as_millis(),
     }
 }
@@ -372,7 +409,7 @@ fn refs_for_query(idx: &Index, q: &str) -> Vec<u32> {
     for t in &tokens {
         match idx.term_map.get(t) {
             Some(refs) if !refs.is_empty() => groups.push(refs),
-            _ => return Vec::new(), // AND semantics: any missing token => no results
+            _ => return Vec::new(), // AND: any missing token => no results
         }
     }
     intersect(&groups)
@@ -403,11 +440,11 @@ fn search_indexed<'a>(
         }
         let e = &idx.entries[r as usize];
         if e.level > max_level {
-            continue;
+            continue; // precomputed level already fail-closed on unreadable rows
         }
         let row = hf
             .as_mut()
-            .map(|f| seek_row_f(f, e.off, e.len))
+            .and_then(|f| seek_row_opt(f, e.off, e.len))
             .unwrap_or_default();
         hits.push(Hit {
             level: e.level,
@@ -513,6 +550,9 @@ fn now_unix() -> i64 {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
 }
+
+/// Verify a remote (non-loopback) request and return the owner's GRANT level
+/// (per-owner cap), or None if denied. Caller caps the requested level by this.
 fn verify_remote(h: &Headers, cfg: &Cfg, expected_verb: &str) -> Option<i64> {
     if cfg.key.is_empty() {
         return None;
@@ -549,7 +589,8 @@ fn verify_remote(h: &Headers, cfg: &Cfg, expected_verb: &str) -> Option<i64> {
     if !ct_eq(&hmac, &expected) {
         return None;
     }
-    Some(LEVEL_OWNER_PRIVATE)
+    // Per-owner grant cap (Node LINK_GRANTS). No grant => denied (fail closed).
+    cfg.grants.get(&owner).copied()
 }
 
 // ── tiny HTTP ────────────────────────────────────────────────────────────────
@@ -587,14 +628,32 @@ fn respond(s: &mut TcpStream, status: &str, ctype: &str, body: &str) {
     );
 }
 fn health_json(cfg: &Cfg, idx: &Index) -> String {
+    let grants: String = cfg
+        .grants
+        .iter()
+        .map(|(o, l)| format!("\"{}\":{}", jesc(o), l))
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"ok\":true,\"schema\":\"asolaria.recall.rust.v1\",\"engine\":\"recall-serve(rust)\",\"colony\":\"{}\",\"owner_pid\":\"{}\",\"bind\":\"{}\",\"port\":{},\"rows\":{},\"search_index\":{{\"enabled\":true,\"index_schema\":\"HILBRA-IDX-BEHCS-TUPLE-TEXT-V1\",\"json_hot_path\":false,\"linear_fallback\":false,\"terms\":{},\"postings\":{},\"built_ms\":{}}},\"auth\":{{\"loopback_open\":true,\"remote_requires_hmac_sha256\":true,\"remote_requires_owner_pid\":true,\"key_configured\":{},\"max_skew_s\":{},\"canonical_message\":\"LINK|owner_pid|host|verb|nonce|ts_unix_s_be64\"}},\"access_levels\":{{\"public\":0,\"federation\":5,\"owner_private\":9,\"public_search_endpoint\":\"/api/public/search?q=...\"}},\"peers\":[{}],\"corpus\":{{\"local_only\":true,\"note\":\"engine publishable; HBP/HBI corpus must not be published\"}}}}",
-        jesc(&cfg.colony), jesc(&cfg.owner_pid), jesc(&cfg.bind), cfg.port, idx.entries.len(),
-        idx.term_map.len(), idx.postings, idx.build_ms,
-        !cfg.key.is_empty(), MAX_SKEW_S,
+        "{{\"ok\":{},\"schema\":\"asolaria.recall.rust.v1\",\"engine\":\"recall-serve(rust)\",\"colony\":\"{}\",\"owner_pid\":\"{}\",\"bind\":\"{}\",\"port\":{},\"rows\":{},\"search_index\":{{\"enabled\":{},\"index_schema\":\"HILBRA-IDX-BEHCS-TUPLE-TEXT-V1\",\"json_hot_path\":false,\"linear_fallback\":false,\"terms\":{},\"postings\":{},\"skipped\":{},\"built_ms\":{}}},\"auth\":{{\"loopback_open\":true,\"remote_requires_hmac_sha256\":true,\"remote_requires_owner_pid\":true,\"key_configured\":{},\"max_skew_s\":{},\"grants\":{{{}}},\"canonical_message\":\"LINK|owner_pid|host|verb|nonce|ts_unix_s_be64\"}},\"access_levels\":{{\"public\":0,\"federation\":5,\"owner_private\":9,\"public_search_endpoint\":\"/api/public/search?q=...\"}},\"peers\":[{}],\"corpus\":{{\"local_only\":true,\"note\":\"engine publishable; HBP/HBI corpus must not be published\"}}}}",
+        idx.ok, jesc(&cfg.colony), jesc(&cfg.owner_pid), jesc(&cfg.bind), cfg.port, idx.entries.len(),
+        idx.ok, idx.term_map.len(), idx.postings, idx.skipped, idx.build_ms,
+        !cfg.key.is_empty(), MAX_SKEW_S, grants,
         cfg.peers.iter().map(|(n, b)| format!("{{\"name\":\"{}\",\"base\":\"{}\"}}", jesc(n), jesc(b))).collect::<Vec<_>>().join(",")
     )
 }
+
+/// Requested level from the query, capped by the grant (Node: min(requested,grant)).
+fn capped_level(query: &str, grant: i64) -> i64 {
+    let raw = query_param(query, "level");
+    let requested = if raw.is_empty() {
+        LEVEL_OWNER_PRIVATE
+    } else {
+        clamp_level(raw.parse::<i64>().unwrap_or(LEVEL_FEDERATION))
+    };
+    requested.min(grant)
+}
+
 fn handle(mut s: TcpStream, cfg: Arc<Cfg>, idx: Arc<Index>) {
     let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(10)));
     let is_loopback = s.peer_addr().map(|a| a.ip().is_loopback()).unwrap_or(false);
@@ -640,30 +699,35 @@ fn handle(mut s: TcpStream, cfg: Arc<Cfg>, idx: Arc<Index>) {
             search_response(&cfg.colony, "public", &q, LEVEL_PUBLIC, cc, &hits)
         }
         "/api/search" => {
-            let max_level = if is_loopback {
-                LEVEL_OWNER_PRIVATE
+            let (grant, mode) = if is_loopback {
+                (LEVEL_OWNER_PRIVATE, "loopback")
             } else {
                 match verify_remote(&h, &cfg, "search") {
-                    Some(l) => l,
+                    Some(g) => (g, "hmac-owner-pid"),
                     None => {
                         respond(&mut s, "401 Unauthorized", "application/json",
-                            "{\"ok\":false,\"error\":\"hmac-required\",\"hint\":\"public L0 open at /api/public/search\"}");
+                            "{\"ok\":false,\"error\":\"hmac-required-or-no-grant\",\"hint\":\"public L0 open at /api/public/search\"}");
                         return;
                     }
                 }
             };
+            let max_level = capped_level(query, grant); // min(requested, grant)
             let (hits, cc) = search_indexed(&idx, &cfg.hbp, &q, &limit, max_level);
-            let mode = if is_loopback {
-                "loopback"
-            } else {
-                "hmac-owner-pid"
-            };
             search_response(&cfg.colony, mode, &q, max_level, cc, &hits)
         }
         "/" => {
-            respond(&mut s, "200 OK", "text/plain; charset=utf-8",
-                &format!("ASOLARIA-RECALL-RUST|colony={}|rows={}|terms={}|inverted=1|routes=/api/health,/api/public/search,/api/search|json=0",
-                    cfg.colony, idx.entries.len(), idx.term_map.len()));
+            respond(
+                &mut s,
+                "200 OK",
+                "text/plain; charset=utf-8",
+                &format!(
+                    "ASOLARIA-RECALL-RUST|colony={}|ok={}|rows={}|terms={}|inverted=1|json=0",
+                    cfg.colony,
+                    idx.ok,
+                    idx.entries.len(),
+                    idx.term_map.len()
+                ),
+            );
             return;
         }
         _ => {
@@ -677,6 +741,22 @@ fn handle(mut s: TcpStream, cfg: Arc<Cfg>, idx: Arc<Index>) {
         }
     };
     respond(&mut s, "200 OK", "application/json", &body);
+}
+
+fn parse_grants(raw: &str) -> HashMap<String, i64> {
+    let mut g = HashMap::new();
+    for part in raw.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        if let Some(i) = part.rfind(':') {
+            let owner = part[..i].trim();
+            if !owner.is_empty() {
+                g.insert(
+                    owner.to_string(),
+                    clamp_level(part[i + 1..].parse::<i64>().unwrap_or(LEVEL_FEDERATION)),
+                );
+            }
+        }
+    }
+    g
 }
 
 fn main() {
@@ -711,6 +791,10 @@ fn main() {
     .map(|s| s.trim().to_string())
     .filter(|s| !s.is_empty())
     .collect();
+    let grants = parse_grants(&env_or(
+        "ASOLARIA_RECALL_GRANTS",
+        "OP-JESSE-PID:9,OP-RAYSSA-PID:9",
+    ));
     let peers: Vec<(String, String)> = env_or("ASOLARIA_RECALL_PEERS", "")
         .split(',')
         .filter_map(|p| {
@@ -737,6 +821,7 @@ fn main() {
         hbp,
         key,
         allowed_owner_pids,
+        grants,
         peers,
     });
 
@@ -748,11 +833,28 @@ fn main() {
         }
     };
     eprintln!(
-        "RECALLSERVE|ok=1|engine=rust-inverted|colony={}|bind={}:{}|rows={}|terms={}|postings={}|built_ms={}|key={}|peers={}|json=0",
-        cfg.colony, cfg.bind, cfg.port, idx.entries.len(), idx.term_map.len(), idx.postings, idx.build_ms, !cfg.key.is_empty(), cfg.peers.len()
+        "RECALLSERVE|ok={}|engine=rust-inverted|colony={}|bind={}:{}|rows={}|terms={}|postings={}|skipped={}|built_ms={}|key={}|peers={}|max_conn={}|json=0",
+        idx.ok, cfg.colony, cfg.bind, cfg.port, idx.entries.len(), idx.term_map.len(), idx.postings, idx.skipped, idx.build_ms, !cfg.key.is_empty(), cfg.peers.len(), MAX_CONN
     );
+
+    // Bounded concurrency: cap live handler threads; excess -> 503 fast-close.
+    let active = Arc::new(AtomicUsize::new(0));
     for stream in listener.incoming().flatten() {
-        let (cfg, idx) = (cfg.clone(), idx.clone());
-        thread::spawn(move || handle(stream, cfg, idx));
+        if active.load(Ordering::SeqCst) >= MAX_CONN {
+            let mut s = stream;
+            respond(
+                &mut s,
+                "503 Service Unavailable",
+                "application/json",
+                "{\"ok\":false,\"error\":\"busy\"}",
+            );
+            continue;
+        }
+        let (cfg, idx, active) = (cfg.clone(), idx.clone(), active.clone());
+        active.fetch_add(1, Ordering::SeqCst);
+        thread::spawn(move || {
+            handle(stream, cfg, idx);
+            active.fetch_sub(1, Ordering::SeqCst);
+        });
     }
 }
