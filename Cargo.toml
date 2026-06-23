@@ -23,6 +23,7 @@ members = [
     "servers/gnn-oracle",
     "servers/cosign-ledger",
     "servers/host8-serve",
+    "tools/recall-serve",
 ]
 
 [workspace.package]
