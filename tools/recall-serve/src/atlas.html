@@ -112,15 +112,20 @@ async function authHeaders(verb){
 async function show(url, verb){ try{ const r=await fetch(url,{headers:await authHeaders(verb)}); document.getElementById('out').textContent=await r.text(); }catch(err){ document.getElementById('out').textContent=String(err&&err.message||err); } }
 async function showOpen(url){ try{ const r=await fetch(url); document.getElementById('out').textContent=await r.text(); }catch(err){ document.getElementById('out').textContent=String(err&&err.message||err); } }
 function requestedLevel(){ return document.getElementById('level').value || '0'; }
-async function publicSearch(){ const q=document.getElementById('q').value; await showOpen('/api/public/search?q='+encodeURIComponent(q)+'&level=0'); }
-async function search(){ const q=document.getElementById('q').value; await show('/api/search?q='+encodeURIComponent(q)+'&level='+encodeURIComponent(requestedLevel()), 'search'); }
-async function randomRow(){ await showOpen('/api/public/search?q=&level=0&limit=1'); }
+// json=0: fetch tuple-text and render the bytes directly in the <pre> (pixels-first, no JSON parse)
+async function publicSearch(){ const q=document.getElementById('q').value; await showOpen('/api/public/search.hbp?q='+encodeURIComponent(q)+'&level=0'); }
+async function search(){ const q=document.getElementById('q').value; await show('/api/search.hbp?q='+encodeURIComponent(q)+'&level='+encodeURIComponent(requestedLevel()), 'search'); }
+async function randomRow(){ await showOpen('/api/public/search.hbp?q=&level=0&limit=1'); }
+// summary from the json=0 tuple-text health endpoint — parse HILBRA* lines, no JSON
+function tup(line){ const o={}; line.split('|').slice(1).forEach(kv=>{const i=kv.indexOf('=');if(i>0)o[kv.slice(0,i)]=kv.slice(i+1);}); return o; }
 (async function(){
   try {
-    const h = await (await fetch('/api/health')).json();
-    const si = h.search_index || {};
-    const fmt = n => (n==null?'—':Number(n).toLocaleString('en-US'));
-    document.getElementById('s-rows').textContent = fmt(h.rows);
+    const txt = await (await fetch('/api/health.hbp')).text();
+    const lines = txt.split('\n');
+    const hh = tup(lines.find(l=>l.startsWith('HILBRAHEALTH'))||'');
+    const si = tup(lines.find(l=>l.startsWith('HILBRAIDX'))||'');
+    const fmt = n => (n==null||n===''?'—':Number(n).toLocaleString('en-US'));
+    document.getElementById('s-rows').textContent = fmt(hh.rows);
     document.getElementById('s-terms').textContent = fmt(si.terms);
     document.getElementById('s-post').textContent = fmt(si.postings);
     document.getElementById('s-skip').textContent = fmt(si.skipped);

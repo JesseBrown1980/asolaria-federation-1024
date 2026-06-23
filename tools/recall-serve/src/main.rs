@@ -35,7 +35,7 @@ const TERM_MAX: usize = 64;
 const MAX_TERMS_PER_ROW: usize = 96;
 const MAX_REFS_PER_TERM: usize = 20000;
 const MAX_ROW_LEN: u64 = 4 * 1024 * 1024; // fail-closed bound on a single .hbp row read
-const MAX_CONN: usize = 64; // bounded concurrency; excess -> 503
+const MAX_CONN: usize = 256; // bounded concurrency; excess -> 503 (keep-alive conns persist)
 
 // Pixels-first portal served at `/` (Recall+Atlas dashboard, layout absorbed from liris).
 const ATLAS_HTML: &str = include_str!("atlas.html");
@@ -623,15 +623,19 @@ fn query_param(query: &str, key: &str) -> String {
     }
     String::new()
 }
-fn respond(s: &mut TcpStream, status: &str, ctype: &str, body: &str) {
+fn respond(s: &mut TcpStream, status: &str, ctype: &str, body: &str, close: bool) {
     // Permissive CORS: trusted-LAN portal; the public tier is open and the authenticated
     // tier still requires a valid HMAC (CORS does not bypass it), so the .hbp/.hbi corpus
     // is never exposed by this header. Lets the :4790-served dashboard reach this engine.
+    // keep-alive when `close` is false → the client reuses the TCP connection (no per-request
+    // handshake), which is the throughput lever (MEASURED ~2x vs connection:close).
+    let conn = if close { "close" } else { "keep-alive" };
     let _ = write!(
         s,
-        "HTTP/1.1 {}\r\ncontent-type: {}\r\ncontent-length: {}\r\naccess-control-allow-origin: *\r\ncache-control: no-store\r\nconnection: close\r\n\r\n{}",
-        status, ctype, body.len(), body
+        "HTTP/1.1 {}\r\ncontent-type: {}\r\ncontent-length: {}\r\naccess-control-allow-origin: *\r\ncache-control: no-store\r\nconnection: {}\r\n\r\n{}",
+        status, ctype, body.len(), conn, body
     );
+    let _ = s.flush();
 }
 fn health_json(cfg: &Cfg, idx: &Index) -> String {
     let grants: String = cfg
@@ -660,99 +664,238 @@ fn capped_level(query: &str, grant: i64) -> i64 {
     requested.min(grant)
 }
 
+// ── HBP tuple-text responses (json=0, fabric-native — parity with serve-recall.cjs task #23) ──
+// Pixels-first: the dashboard + agents read this tuple text directly; no JSON in the data path.
+fn hbp_escape(s: &str) -> String {
+    s.replace('\r', "\\r")
+        .replace('\n', "\\n")
+        .replace('|', "%7C")
+}
+fn hbp_line(kind: &str, fields: &[(&str, String)]) -> String {
+    let mut out = String::from(kind);
+    for (k, v) in fields {
+        out.push('|');
+        out.push_str(k);
+        out.push('=');
+        out.push_str(&hbp_escape(v));
+    }
+    out.push_str("|json=0\n");
+    out
+}
+fn row_sha16(row: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(row.as_bytes());
+    let mut hex = String::with_capacity(16);
+    for b in h.finalize().iter().take(8) {
+        hex.push_str(&format!("{:02x}", b));
+    }
+    hex
+}
+fn health_hbp(cfg: &Cfg, idx: &Index) -> String {
+    let mut body = hbp_line(
+        "HILBRAHEALTH",
+        &[
+            ("colony", cfg.colony.clone()),
+            ("owner_pid", cfg.owner_pid.clone()),
+            ("bind", cfg.bind.clone()),
+            ("port", cfg.port.to_string()),
+            ("rows", idx.entries.len().to_string()),
+            (
+                "key_configured",
+                (if cfg.key.is_empty() { 0 } else { 1 }).to_string(),
+            ),
+            ("peers", cfg.peers.len().to_string()),
+        ],
+    );
+    body += &hbp_line(
+        "HILBRAIDX",
+        &[
+            ("enabled", (i32::from(idx.ok)).to_string()),
+            ("schema", "HILBRA-IDX-BEHCS-TUPLE-TEXT-V1".to_string()),
+            ("rows", idx.entries.len().to_string()),
+            ("terms", idx.term_map.len().to_string()),
+            ("postings", idx.postings.to_string()),
+            ("skipped", idx.skipped.to_string()),
+            ("built_ms", idx.build_ms.to_string()),
+            ("json_hot_path", "0".to_string()),
+            ("linear_fallback", "0".to_string()),
+        ],
+    );
+    for (n, b) in &cfg.peers {
+        body += &hbp_line("HILBRAPEER", &[("name", n.clone()), ("base", b.clone())]);
+    }
+    body
+}
+fn search_hbp(
+    colony: &str,
+    mode: &str,
+    q: &str,
+    max_level: i64,
+    candidate_count: usize,
+    hits: &[Hit],
+) -> String {
+    let mut body = hbp_line(
+        "HILBRASEARCH",
+        &[
+            ("colony", colony.to_string()),
+            ("q", q.to_string()),
+            ("count", hits.len().to_string()),
+            ("max_level", max_level.to_string()),
+            ("mode", "inverted-index".to_string()),
+            ("index_schema", "HILBRA-IDX-BEHCS-TUPLE-TEXT-V1".to_string()),
+            ("candidate_count", candidate_count.to_string()),
+            ("access_mode", mode.to_string()),
+        ],
+    );
+    for (i, hit) in hits.iter().enumerate() {
+        body += &hbp_line(
+            "HILBRAMATCH",
+            &[
+                ("i", i.to_string()),
+                ("level", hit.level.to_string()),
+                ("pid", hit.e.pid.clone()),
+                ("bh", hit.e.bh.clone()),
+                ("path", hit.e.path.clone()),
+                ("off", hit.e.off_s.clone()),
+                ("len", hit.e.len_s.clone()),
+                ("row_sha16", row_sha16(&hit.row)),
+            ],
+        );
+    }
+    body
+}
+
 fn handle(mut s: TcpStream, cfg: Arc<Cfg>, idx: Arc<Index>) {
-    let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+    // Idle timeout closes a connection that goes quiet between requests.
+    let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(30)));
     let is_loopback = s.peer_addr().map(|a| a.ip().is_loopback()).unwrap_or(false);
     let mut reader = BufReader::new(match s.try_clone() {
         Ok(c) => c,
         Err(_) => return,
     });
-    let mut req_line = String::new();
-    if reader.read_line(&mut req_line).is_err() {
-        return;
-    }
-    let parts: Vec<&str> = req_line.split_whitespace().collect();
-    if parts.len() < 2 {
-        return;
-    }
-    let (path, query) = parts[1].split_once('?').unwrap_or((parts[1], ""));
-    let mut headers = Vec::new();
-    loop {
-        let mut h = String::new();
-        if reader.read_line(&mut h).is_err() || h == "\r\n" || h == "\n" || h.is_empty() {
-            break;
+    // keep-alive request loop: one TCP connection serves up to MAX_REQS_PER_CONN requests,
+    // so a flooding client pays the TCP handshake once, not per query (the throughput lever).
+    const MAX_REQS_PER_CONN: usize = 100_000;
+    for reqn in 0..MAX_REQS_PER_CONN {
+        let mut req_line = String::new();
+        match reader.read_line(&mut req_line) {
+            Ok(0) | Err(_) => return, // EOF / idle-timeout / error → client done
+            Ok(_) => {}
         }
-        if let Some(i) = h.find(':') {
-            headers.push((h[..i].trim().to_string(), h[i + 1..].trim().to_string()));
+        if req_line.trim().is_empty() {
+            continue; // tolerate a stray blank line between pipelined requests
         }
-    }
-    let h = Headers(headers);
-    let q = query_param(query, "q");
-    let limit = query_param(query, "limit");
+        let parts: Vec<&str> = req_line.split_whitespace().collect();
+        if parts.len() < 2 {
+            return;
+        }
+        // own the path/query so the request_line buffer can be reused on the next iteration
+        let (path_owned, query_owned) = {
+            let (p, qy) = parts[1].split_once('?').unwrap_or((parts[1], ""));
+            (p.to_string(), qy.to_string())
+        };
+        let (path, query) = (path_owned.as_str(), query_owned.as_str());
+        let mut headers = Vec::new();
+        loop {
+            let mut hl = String::new();
+            match reader.read_line(&mut hl) {
+                Ok(0) | Err(_) => return,
+                Ok(_) => {}
+            }
+            if hl == "\r\n" || hl == "\n" {
+                break;
+            }
+            if let Some(i) = hl.find(':') {
+                headers.push((hl[..i].trim().to_string(), hl[i + 1..].trim().to_string()));
+            }
+        }
+        let h = Headers(headers);
+        let q = query_param(query, "q");
+        let limit = query_param(query, "limit");
+        let last = reqn + 1 >= MAX_REQS_PER_CONN; // close the connection on the final allowed request
 
-    let body = match path {
-        "/api/health" | "/health" => {
-            respond(
-                &mut s,
-                "200 OK",
-                "application/json",
-                &health_json(&cfg, &idx),
-            );
-            return;
-        }
-        "/api/public/search" => {
-            let (hits, cc) = search_indexed(&idx, &cfg.hbp, &q, &limit, LEVEL_PUBLIC);
-            search_response(&cfg.colony, "public", &q, LEVEL_PUBLIC, cc, &hits)
-        }
-        "/api/search" => {
-            let (grant, mode) = if is_loopback {
-                (LEVEL_OWNER_PRIVATE, "loopback")
-            } else {
-                match verify_remote(&h, &cfg, "search") {
-                    Some(g) => (g, "hmac-owner-pid"),
-                    None => {
-                        respond(&mut s, "401 Unauthorized", "application/json",
-                            "{\"ok\":false,\"error\":\"hmac-required-or-no-grant\",\"hint\":\"public L0 open at /api/public/search\"}");
-                        return;
+        let (status, ctype, body): (&str, &str, String) = match path {
+            "/api/health" | "/health" => ("200 OK", "application/json", health_json(&cfg, &idx)),
+            "/api/public/search" => {
+                let (hits, cc) = search_indexed(&idx, &cfg.hbp, &q, &limit, LEVEL_PUBLIC);
+                (
+                    "200 OK",
+                    "application/json",
+                    search_response(&cfg.colony, "public", &q, LEVEL_PUBLIC, cc, &hits),
+                )
+            }
+            "/api/search" => {
+                let grant_mode = if is_loopback {
+                    Some((LEVEL_OWNER_PRIVATE, "loopback"))
+                } else {
+                    verify_remote(&h, &cfg, "search").map(|g| (g, "hmac-owner-pid"))
+                };
+                match grant_mode {
+                    Some((grant, mode)) => {
+                        let max_level = capped_level(query, grant); // min(requested, grant)
+                        let (hits, cc) = search_indexed(&idx, &cfg.hbp, &q, &limit, max_level);
+                        ("200 OK", "application/json", search_response(&cfg.colony, mode, &q, max_level, cc, &hits))
                     }
+                    None => (
+                        "401 Unauthorized",
+                        "application/json",
+                        "{\"ok\":false,\"error\":\"hmac-required-or-no-grant\",\"hint\":\"public L0 open at /api/public/search\"}".to_string(),
+                    ),
                 }
-            };
-            let max_level = capped_level(query, grant); // min(requested, grant)
-            let (hits, cc) = search_indexed(&idx, &cfg.hbp, &q, &limit, max_level);
-            search_response(&cfg.colony, mode, &q, max_level, cc, &hits)
-        }
-        "/" => {
-            // Pixels-first portal: the Recall+Atlas dashboard, served same-origin so its
-            // /api calls are piped with no CORS. Layout absorbed from liris (bilateral exchange).
-            respond(&mut s, "200 OK", "text/html; charset=utf-8", ATLAS_HTML);
-            return;
-        }
-        "/status" => {
-            respond(
-                &mut s,
+            }
+            // Pixels-first portal: the Recall+Atlas dashboard, served same-origin (layout absorbed from liris).
+            "/" => ("200 OK", "text/html; charset=utf-8", ATLAS_HTML.to_string()),
+            "/status" => (
                 "200 OK",
                 "text/plain; charset=utf-8",
-                &format!(
+                format!(
                     "ASOLARIA-RECALL-RUST|colony={}|ok={}|rows={}|terms={}|inverted=1|json=0",
                     cfg.colony,
                     idx.ok,
                     idx.entries.len(),
                     idx.term_map.len()
                 ),
-            );
-            return;
-        }
-        _ => {
-            respond(
-                &mut s,
+            ),
+            // ── json=0 tuple-text endpoints (the fabric-native hot path; dashboard + agents use these) ──
+            "/api/health.hbp" | "/health.hbp" => (
+                "200 OK",
+                "text/plain; charset=utf-8",
+                health_hbp(&cfg, &idx),
+            ),
+            "/api/public/search.hbp" => {
+                let (hits, cc) = search_indexed(&idx, &cfg.hbp, &q, &limit, LEVEL_PUBLIC);
+                (
+                    "200 OK",
+                    "text/plain; charset=utf-8",
+                    search_hbp(&cfg.colony, "public", &q, LEVEL_PUBLIC, cc, &hits),
+                )
+            }
+            "/api/search.hbp" => {
+                let grant_mode = if is_loopback {
+                    Some((LEVEL_OWNER_PRIVATE, "loopback"))
+                } else {
+                    verify_remote(&h, &cfg, "search").map(|g| (g, "hmac-owner-pid"))
+                };
+                match grant_mode {
+                    Some((grant, mode)) => {
+                        let max_level = capped_level(query, grant);
+                        let (hits, cc) = search_indexed(&idx, &cfg.hbp, &q, &limit, max_level);
+                        ("200 OK", "text/plain; charset=utf-8", search_hbp(&cfg.colony, mode, &q, max_level, cc, &hits))
+                    }
+                    None => ("401 Unauthorized", "text/plain; charset=utf-8", "HILBRAERR|error=hmac-required-or-no-grant|hint=public L0 open at /api/public/search.hbp|json=0\n".to_string()),
+                }
+            }
+            _ => (
                 "404 Not Found",
-                "application/json",
-                "{\"ok\":false,\"error\":\"unknown route\"}",
-            );
+                "text/plain; charset=utf-8",
+                "HILBRAERR|error=unknown route|json=0\n".to_string(),
+            ),
+        };
+        respond(&mut s, status, ctype, &body, last);
+        if last {
             return;
         }
-    };
-    respond(&mut s, "200 OK", "application/json", &body);
+    }
 }
 
 fn parse_grants(raw: &str) -> HashMap<String, i64> {
@@ -859,6 +1002,7 @@ fn main() {
                 "503 Service Unavailable",
                 "application/json",
                 "{\"ok\":false,\"error\":\"busy\"}",
+                true,
             );
             continue;
         }
