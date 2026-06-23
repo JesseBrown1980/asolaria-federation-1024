@@ -423,7 +423,12 @@ fn vantage_tag(vantage: VantageId) -> &'static str {
 fn mint_agent_pid(handle: u64, role: AgentRole, vantage: VantageId, tier: AccessTier) -> String {
     let seed = fnv1a64(&[handle, role as u64, vantage as u64, tier as u64]);
     let hex12 = seed & 0x0000_FFFF_FFFF_FFFF; // low 48 bits -> 12 hex chars
-    alloc::format!("AGT-{}-{}-H{:012X}", vantage_tag(vantage), role_tag(role), hex12)
+    alloc::format!(
+        "AGT-{}-{}-H{:012X}",
+        vantage_tag(vantage),
+        role_tag(role),
+        hex12
+    )
 }
 
 /// Operator-witness gate for Big-Pickle actions.
@@ -530,7 +535,10 @@ mod tests {
         let pid2 = r2
             .spawn(AgentRole::Hermes, VantageId::Acer, AccessTier::Public)
             .expect("spawn ok");
-        assert_eq!(pid, pid2, "PID mint must be deterministic in (handle,role,vantage,tier)");
+        assert_eq!(
+            pid, pid2,
+            "PID mint must be deterministic in (handle,role,vantage,tier)"
+        );
         // Different role -> different PID at the same index.
         let mut r3 = AgentRegistry::new();
         let pid3 = r3
@@ -591,11 +599,20 @@ mod tests {
         r.note_omnidispatch_routed();
         r.note_opencode_free_agent_call();
         let c = r.counters();
-        assert_eq!(c.virtual_registered, 2, "two virtual-pointer agents (no process)");
-        assert_eq!(c.receipt_gated_helper, 1, "one receipt-gated real helper (eligible, not fired)");
+        assert_eq!(
+            c.virtual_registered, 2,
+            "two virtual-pointer agents (no process)"
+        );
+        assert_eq!(
+            c.receipt_gated_helper, 1,
+            "one receipt-gated real helper (eligible, not fired)"
+        );
         assert_eq!(c.omnidispatch_routed, 1);
         assert_eq!(c.opencode_free_agent_call, 1);
-        assert_eq!(c.os_process_spawn, 0, "NOTHING fired — OS process count stays 0 (gated)");
+        assert_eq!(
+            c.os_process_spawn, 0,
+            "NOTHING fired — OS process count stays 0 (gated)"
+        );
         assert_eq!(c.ambiguous_held, 0, "no un-receipted real requests here");
         // class is tagged on each entry.
         assert_eq!(r.entries[0].class, AgentClass::VirtualPointer);
@@ -614,7 +631,10 @@ mod tests {
         assert_eq!(r.entries[0].class, AgentClass::Ambiguous);
         let c = r.counters();
         assert_eq!(c.ambiguous_held, 1, "storm-guard tally");
-        assert_eq!(c.receipt_gated_helper, 0, "no receipt -> NOT a sanctioned real helper");
+        assert_eq!(
+            c.receipt_gated_helper, 0,
+            "no receipt -> NOT a sanctioned real helper"
+        );
         assert_eq!(c.os_process_spawn, 0, "held, never launched");
         assert!(pid.starts_with("AGT-"), "still registered (E=0): {pid}");
         // classify_request directly mirrors the proven 3-state agent-class-check.

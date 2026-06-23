@@ -68,7 +68,11 @@ mod tests {
             AgentRole::SpaceDeckDriver,
         ] {
             let spec = runner_for_role(role);
-            assert_eq!(spec.kind, RunnerKind::OpenCode, "role {role:?} should use OpenCode");
+            assert_eq!(
+                spec.kind,
+                RunnerKind::OpenCode,
+                "role {role:?} should use OpenCode"
+            );
             assert_eq!(spec.bin_env, "OPENCODE_BIN");
             assert_eq!(spec.default_model, "opencode/big-pickle");
         }
