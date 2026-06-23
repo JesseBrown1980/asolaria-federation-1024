@@ -15,6 +15,16 @@ use asolaria_server_cosign_ledger::CosignChain;
 use asolaria_server_gnn_oracle::{GnnInference, ObservedFrame};
 use asolaria_server_highway::check_transit;
 use asolaria_server_tier_policy::{policy_for, AccessTier};
+// #24 launch-plan composition: route a summon through C/D rooms -> runner lane -> spawn-gate ring.
+// PURE/DRY: the /launch-plan.hbp route NEVER spawns a process (process_launch=0 always).
+use asolaria_kernel_core::hookwall::HookTier;
+use asolaria_kernel_core::spawn_gate::{seal_row, spawn_gate_verdict, SpawnGateInput};
+use asolaria_kernel_core::syscall::{AccessTier as KernelAccessTier, HookwallVerdict};
+use asolaria_server_agent_runtime::rooms::{
+    room_folder_name, room_id_from_pid, substrate_for_stage, RoomStage, Substrate,
+};
+use asolaria_server_agent_runtime::runners::{runner_for_role, RunnerKind};
+use asolaria_server_agent_runtime::AgentRole;
 
 const DEFAULT_BIND: &str = "127.0.0.1:5088";
 const DEFAULT_ROOM_ID: &str = "gnn-dispatch-bridge";
@@ -790,6 +800,8 @@ fn render_feed(
         "HOST8ROUTE|path=/count.hbp|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/summon.hbp?h=<handle8>&device=<d>&ts=<unix>&fire=<0|1>|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/v1/envelope.hbp?caller=&target=&verb=&payload=&cube=&glyph=&cosign=&ttl=&ant=&row=[&ts=]|method=GET|format=HBP|json=0".to_string(),
+        "HOST8ROUTE|path=/launch-plan.hbp?h=<handle8>&device=<d>&ts=<unix>&role=<hermes|sub>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
+        "HOST8ROUTE|path=/summon-batch.hbp?count=<N>&role=<hermes|sub>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
     ]
     .join("\n")
         + "\n"
@@ -1076,6 +1088,188 @@ fn render_envelope(query: &str, registry: &mut AgentRegistry) -> String {
     }
 }
 
+/// Spawn syscall number used for the launch-plan seal context. Cosmetic to the verdict (which keys
+/// on tier + score, not the syscall no); binds to the canonical sys_spawn number in the launch wave.
+const SYS_SPAWN_GATED: u8 = 9;
+
+fn substrate_str(s: Substrate) -> &'static str {
+    match s {
+        Substrate::CDrive => "C",
+        Substrate::DDrive => "D",
+    }
+}
+
+fn runner_kind_str(k: RunnerKind) -> &'static str {
+    match k {
+        RunnerKind::OpenCode => "opencode",
+        RunnerKind::Hermes => "hermes",
+    }
+}
+
+fn verdict_str(v: HookwallVerdict) -> &'static str {
+    match v {
+        HookwallVerdict::Proceed => "PROCEED",
+        HookwallVerdict::Hold => "HOLD",
+        HookwallVerdict::Block => "BLOCK",
+    }
+}
+
+/// 16-byte HVD seal row -> 32 lowercase hex chars.
+fn seal_hex(row: &[u8; 16]) -> String {
+    let mut out = String::with_capacity(32);
+    for b in row.iter() {
+        out.push_str(&format!("{:02x}", b));
+    }
+    out
+}
+
+/// `/launch-plan.hbp?h=<handle8>&device=&ts=&role=<hermes|sub>&score=<q>&risk=<q>` — #24: compose the
+/// DRY launch plan for ONE summon by routing it through the three E=0 contracts in order:
+///   C/D room (rooms::room_id_from_pid -> rotating C: room) -> runner lane (runners::runner_for_role)
+///   -> spawn-gate ring verdict (kernel spawn_gate::spawn_gate_verdict, BLOCK>HOLD>PROCEED) -> sealed
+/// HBP receipt. It NEVER fires: `process_launch=0` ALWAYS. It only reports whether a fire WOULD be
+/// permitted (`fire_allowed=1` iff the gate PROCEEDs). The actual gated fire stays in the summon path.
+fn render_launch_plan(book: &SeatBook, _config: &Config, gnn_score_q: u32, query: &str) -> (bool, String) {
+    let handle = query_param(query, "h").unwrap_or_default().to_lowercase();
+    let device = {
+        let d = query_param(query, "device").unwrap_or_default();
+        if d.is_empty() {
+            "acer".to_string()
+        } else {
+            d
+        }
+    };
+    let ts = query_param(query, "ts")
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| unix_seconds().to_string());
+
+    let seat = match book.seats.iter().find(|s| s.handle8 == handle) {
+        Some(seat) => seat,
+        None => {
+            return (
+                false,
+                format!(
+                    "HOST8ERR|status=404|handle8={}|reason=seat_not_found|json=0\n",
+                    hbp_escape(&handle)
+                ),
+            );
+        }
+    };
+
+    let (verb, noun, glyph, sha) = tuple60d(&seat.name, &seat.handle8, &seat.cube_bh, &book.verbs);
+    let instance_pid = resolve_instance_pid(&seat.handle8, &device, &ts, &verb, &noun, &glyph, &sha);
+
+    // 1. C/D room routing (rooms.rs): agent rooms rotate on C: (rename-before-load = $0).
+    let room_id = room_id_from_pid(&instance_pid);
+    let room_folder = room_folder_name(room_id);
+    let substrate = substrate_for_stage(RoomStage::AgentRoom);
+
+    // 2. Runner lane (runners.rs): &role=hermes -> Hermes lane; else the proven $0 OpenCode lane.
+    let role = match query_param(query, "role").as_deref() {
+        Some("hermes") => AgentRole::Hermes,
+        _ => AgentRole::SubAgent,
+    };
+    let runner = runner_for_role(role);
+
+    // 3. Spawn-gate ring (kernel spawn_gate): forward score defaults to the latest GNN frame score
+    //    (pixels-before-GPU), reverse risk defaults to 0; both overridable via &score= / &risk=.
+    let fwd = query_param(query, "score")
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(gnn_score_q);
+    let rev = query_param(query, "risk")
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0);
+    let caller_pid =
+        u64::from_str_radix(&instance_pid[..instance_pid.len().min(16)], 16).unwrap_or(0);
+    let gate_in = SpawnGateInput {
+        slot: (room_id % 64) as u8,
+        syscall_no: SYS_SPAWN_GATED,
+        caller_pid,
+        tier: HookTier::Micro,
+        target_tier: KernelAccessTier::Public,
+        event_tags: &[],
+        forward_score_q: fwd,
+        reverse_risk_q: rev,
+    };
+    let verdict = spawn_gate_verdict(&gate_in);
+    let seal = seal_row(&gate_in, verdict);
+    let fire_allowed = matches!(verdict, HookwallVerdict::Proceed);
+
+    let body = format!(
+        "HOST8LAUNCHPLAN|base_handle8={}|instance_pid={}|device={}|ts={}|verb={}|noun={}|room_id={}|room_folder={}|substrate={}|runner_kind={}|runner_bin_env={}|runner_model={}|gate_verdict={}|gate_fwd_q={}|gate_rev_q={}|seal_row={}|fire_allowed={}|process_launch=0|json=0\n",
+        hbp_escape(&seat.handle8),
+        hbp_escape(&instance_pid),
+        hbp_escape(&device),
+        hbp_escape(&ts),
+        hbp_escape(&verb),
+        hbp_escape(&noun),
+        room_id,
+        hbp_escape(&room_folder),
+        substrate_str(substrate),
+        runner_kind_str(runner.kind),
+        hbp_escape(runner.bin_env),
+        hbp_escape(runner.default_model),
+        verdict_str(verdict),
+        fwd,
+        rev,
+        seal_hex(&seal),
+        if fire_allowed { 1 } else { 0 },
+    );
+    (true, body)
+}
+
+/// `/summon-batch.hbp?count=N&role=&score=&risk=` — #24 fan-out: plan a launch for the FIRST N seats
+/// (capped at 1000/request), each routed C/D room -> runner -> spawn-gate, DRY. The operator's
+/// "10k and 10k prisms" expressed as a batch PLAN, not a launcher: `process_launch=0` ALWAYS, zero
+/// spawns. Emits a HOST8BATCH summary (per-verdict + per-substrate tallies) then one HOST8LAUNCHPLAN
+/// line per seat. Reuses `render_launch_plan` per seat (its core is the single-summon contract).
+fn render_summon_batch(book: &SeatBook, config: &Config, gnn_score_q: u32, query: &str) -> String {
+    const MAX_BATCH: usize = 1000;
+    let requested = query_param(query, "count")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(1);
+    let role = query_param(query, "role").unwrap_or_default();
+    let score = query_param(query, "score").unwrap_or_default();
+    let risk = query_param(query, "risk").unwrap_or_default();
+    let n = requested.min(MAX_BATCH).min(book.seats.len());
+
+    let mut lines = String::new();
+    let (mut proceed, mut hold, mut block, mut c_rooms, mut d_rooms) = (0usize, 0usize, 0usize, 0usize, 0usize);
+    for seat in book.seats.iter().take(n) {
+        let sub_query = format!(
+            "h={}&role={}&score={}&risk={}",
+            seat.handle8, role, score, risk
+        );
+        let (_ok, line) = render_launch_plan(book, config, gnn_score_q, &sub_query);
+        match hbp_field(&line, "gate_verdict").as_deref() {
+            Some("PROCEED") => proceed += 1,
+            Some("HOLD") => hold += 1,
+            _ => block += 1,
+        }
+        match hbp_field(&line, "substrate").as_deref() {
+            Some("C") => c_rooms += 1,
+            Some("D") => d_rooms += 1,
+            _ => {}
+        }
+        lines.push_str(&line);
+    }
+
+    let mut out = format!(
+        "HOST8BATCH|requested={}|planned={}|seats_available={}|cap={}|proceed={}|hold={}|block={}|c_rooms={}|d_rooms={}|process_launch=0|json=0\n",
+        requested,
+        n,
+        book.seats.len(),
+        MAX_BATCH,
+        proceed,
+        hold,
+        block,
+        c_rooms,
+        d_rooms
+    );
+    out.push_str(&lines);
+    out
+}
+
 fn handle_client(
     mut stream: TcpStream,
     room: &Room,
@@ -1108,6 +1302,16 @@ fn handle_client(
             (if ok { "200 OK" } else { "404 Not Found" }, body)
         }
         "/v1/envelope.hbp" => ("200 OK", render_envelope(query, registry)),
+        "/launch-plan.hbp" => {
+            // GNN frame score (pixels-before-GPU) is the default gate forward-score; overridable by &score=.
+            let gnn_score_q = gnn.preview_latest_score_q().unwrap_or(0);
+            let (ok, body) = render_launch_plan(book, config, gnn_score_q, query);
+            (if ok { "200 OK" } else { "404 Not Found" }, body)
+        }
+        "/summon-batch.hbp" => {
+            let gnn_score_q = gnn.preview_latest_score_q().unwrap_or(0);
+            ("200 OK", render_summon_batch(book, config, gnn_score_q, query))
+        }
         "/seat.hbp" => {
             let handle = query_param(query, "h").unwrap_or_default();
             let body = render_seat_lookup(book, &handle);
@@ -1388,5 +1592,118 @@ mod tests {
         let (ok2, body2) = render_summon(&book, &config, "h=deadbeefdeadbeef&device=acer");
         assert!(!ok2);
         assert!(body2.contains("HOST8ERR|status=404"));
+    }
+
+    fn launch_plan_test_fixture() -> (SeatBook, Config) {
+        let mut book = SeatBook::default();
+        book.seats.push(Seat {
+            name: NODE_NAME.to_string(),
+            handle8: NODE_HANDLE8.to_string(),
+            cube_bh: NODE_CUBE_BH.to_string(),
+            hilbert: "1339".to_string(),
+            class: "level3_chief".to_string(),
+            layer: "chief".to_string(),
+            source: "test".to_string(),
+        });
+        book.verbs = vec![NODE_VERB.to_string()];
+        let config = Config {
+            bind: DEFAULT_BIND.to_string(),
+            room_stub_path: None,
+            cadence_frame_path: None,
+            office_dir: DEFAULT_OFFICE_DIR.to_string(),
+            feed_dir: DEFAULT_FEED_DIR.to_string(),
+            once: false,
+            verb_catalog: DEFAULT_VERB_CATALOG.to_string(),
+            summon_root: DEFAULT_SUMMON_ROOT.to_string(),
+            summon_model: DEFAULT_SUMMON_MODEL.to_string(),
+            opencode_js_bin: DEFAULT_OPENCODE_JS_BIN.to_string(),
+        };
+        (book, config)
+    }
+
+    #[test]
+    fn launch_plan_composes_room_runner_gate_without_firing() {
+        let (book, config) = launch_plan_test_fixture();
+        // No GNN score (0) => gate HOLDs (genius not cleared) => fire_allowed=0. NEVER launches.
+        let (ok, body) =
+            render_launch_plan(&book, &config, 0, "h=0155964ffc8ef1f8&device=acer&ts=1750000000");
+        assert!(ok);
+        assert!(body.contains(&format!("instance_pid={}", NODE_INSTANCE_PID)));
+        assert!(body.contains("room_id="));
+        assert!(body.contains("room_folder=omni-room-behcs-256-"));
+        assert!(body.contains("substrate=C")); // agent rooms rotate on C:
+        assert!(body.contains("runner_kind=opencode")); // sub-agent -> $0 OpenCode lane
+        assert!(body.contains("runner_model=opencode/big-pickle"));
+        assert!(body.contains("gate_verdict=HOLD")); // no score => held by the ring
+        assert!(body.contains("fire_allowed=0"));
+        assert!(body.contains("process_launch=0")); // this route NEVER fires
+        assert!(body.contains("seal_row="));
+        assert!(body.contains("json=0"));
+        assert!(!body.contains('{'));
+        assert!(!body.contains('}'));
+    }
+
+    #[test]
+    fn launch_plan_gate_proceeds_on_genius_score_but_still_does_not_launch() {
+        let (book, config) = launch_plan_test_fixture();
+        // forward score >= 720 (genius) and reverse risk <= 280 => gate PROCEEDs.
+        let (_ok, body) = render_launch_plan(
+            &book,
+            &config,
+            0,
+            "h=0155964ffc8ef1f8&device=acer&ts=1750000000&score=800&risk=10",
+        );
+        assert!(body.contains("gate_verdict=PROCEED"));
+        assert!(body.contains("fire_allowed=1"));
+        // even when a fire WOULD be allowed, this route never launches a process.
+        assert!(body.contains("process_launch=0"));
+    }
+
+    #[test]
+    fn launch_plan_hermes_role_selects_hermes_lane() {
+        let (book, config) = launch_plan_test_fixture();
+        let (_ok, body) = render_launch_plan(&book, &config, 0, "h=0155964ffc8ef1f8&role=hermes");
+        assert!(body.contains("runner_kind=hermes"));
+        assert!(body.contains("runner_bin_env=ASOLARIA_HERMES_BIN"));
+        assert!(body.contains("runner_model=hermes-4-70b"));
+    }
+
+    #[test]
+    fn launch_plan_unknown_handle_is_404() {
+        let (book, config) = launch_plan_test_fixture();
+        let (ok, body) = render_launch_plan(&book, &config, 800, "h=deadbeefdeadbeef&device=acer");
+        assert!(!ok);
+        assert!(body.contains("HOST8ERR|status=404"));
+    }
+
+    #[test]
+    fn summon_batch_plans_n_dry_with_tallies() {
+        let (mut book, config) = launch_plan_test_fixture();
+        // add a second seat so the batch plans 2.
+        book.seats.push(Seat {
+            name: "AGT-C4".to_string(),
+            handle8: "f679158eb8ca4531".to_string(),
+            cube_bh: "BH.4.0.100".to_string(),
+            hilbert: "930".to_string(),
+            class: "hyperbehcs_supervisor_entity".to_string(),
+            layer: "supervisor".to_string(),
+            source: "test".to_string(),
+        });
+        // genius score => both PROCEED; both agent rooms route to C:. DRY: process_launch=0, zero spawns.
+        let out = render_summon_batch(&book, &config, 0, "count=5&score=800&risk=10");
+        assert!(out.contains("HOST8BATCH|requested=5|planned=2|")); // only 2 seats available
+        assert!(out.contains("proceed=2"));
+        assert!(out.contains("c_rooms=2"));
+        assert!(out.contains("process_launch=0"));
+        assert_eq!(out.matches("HOST8LAUNCHPLAN|").count(), 2); // one plan line per planned seat
+        assert!(out.contains("json=0"));
+        assert!(!out.contains('{'));
+        assert!(!out.contains('}'));
+
+        // no score => both HOLD (gate not genius-cleared); still zero launches.
+        let held = render_summon_batch(&book, &config, 0, "count=2");
+        assert!(held.contains("hold=2"));
+        assert!(held.contains("proceed=0"));
+        assert!(held.contains("process_launch=0"));
     }
 }
