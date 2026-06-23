@@ -803,6 +803,7 @@ fn render_feed(
         "HOST8ROUTE|path=/launch-plan.hbp?h=<handle8>&device=<d>&ts=<unix>&role=<hermes|sub>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/summon-batch.hbp?count=<N>&role=<hermes|sub>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/shadow-parity.hbp?count=<N>&device=<d>&role=<hermes|sub>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
+        "HOST8ROUTE|path=/replay-prep.hbp?target=<N>&sample=<N>&batch=<N>&device=<d>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
     ]
     .join("\n")
         + "\n"
@@ -1352,6 +1353,88 @@ fn render_shadow_parity(book: &SeatBook, config: &Config, gnn_score_q: u32, quer
     out
 }
 
+fn parse_u128_param(query: &str, key: &str, fallback: u128) -> u128 {
+    query_param(query, key)
+        .and_then(|v| v.parse::<u128>().ok())
+        .unwrap_or(fallback)
+}
+
+fn ceil_div_u128(n: u128, d: u128) -> u128 {
+    if d == 0 {
+        0
+    } else {
+        (n + d - 1) / d
+    }
+}
+
+/// `/replay-prep.hbp?target=N&sample=N&batch=N&device=&score=&risk=` — #26: prepare the
+/// controlled 100B replay without running it. It samples the #25 shadow parity surface, computes
+/// the batch geometry for the requested target, and emits a hard gate receipt. It is deliberately
+/// conservative: even if the sample is clean, `auto_fire_allowed=0` and `process_launch=0` remain.
+fn render_replay_prep(book: &SeatBook, config: &Config, gnn_score_q: u32, query: &str) -> String {
+    const DEFAULT_TARGET: u128 = 100_000_000_000;
+    const DEFAULT_BATCH: u128 = 10_000;
+    const MAX_SAMPLE: usize = 1000;
+
+    let target = parse_u128_param(query, "target", DEFAULT_TARGET);
+    let batch = parse_u128_param(query, "batch", DEFAULT_BATCH).max(1);
+    let requested_sample = query_param(query, "sample")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(100);
+    let sample = requested_sample.min(MAX_SAMPLE).min(book.seats.len());
+    let device = query_param(query, "device").unwrap_or_else(|| "acer".to_string());
+    let ts = query_param(query, "ts")
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| unix_seconds().to_string());
+    let role = query_param(query, "role").unwrap_or_default();
+    let score = query_param(query, "score").unwrap_or_default();
+    let risk = query_param(query, "risk").unwrap_or_default();
+    let batches = ceil_div_u128(target, batch);
+
+    let shadow_query = format!(
+        "count={}&device={}&ts={}&role={}&score={}&risk={}",
+        sample, device, ts, role, score, risk
+    );
+    let shadow = render_shadow_parity(book, config, gnn_score_q, &shadow_query);
+    let shadow_head = shadow.lines().next().unwrap_or("");
+    let matched = hbp_field(shadow_head, "matched").unwrap_or_else(|| "0".to_string());
+    let mismatched = hbp_field(shadow_head, "mismatched").unwrap_or_else(|| "0".to_string());
+    let proceed = hbp_field(shadow_head, "proceed").unwrap_or_else(|| "0".to_string());
+    let hold = hbp_field(shadow_head, "hold").unwrap_or_else(|| "0".to_string());
+    let block = hbp_field(shadow_head, "block").unwrap_or_else(|| "0".to_string());
+
+    let status = if sample == 0 {
+        "BLOCKED_NO_SEATS"
+    } else if mismatched != "0" {
+        "BLOCKED_SHADOW_MISMATCH"
+    } else {
+        "READY_FOR_PACKET_REGISTRY_REPLAY"
+    };
+    let reason = if sample == 0 {
+        "seatbook_empty"
+    } else if mismatched != "0" {
+        "shadow_identity_mismatch"
+    } else {
+        "shadow_identity_clean_fire_still_gated"
+    };
+
+    format!(
+        "HOST8REPLAYPREP|target_total={}|batch_size={}|estimated_batches={}|sample_requested={}|sample_checked={}|sample_matched={}|sample_mismatched={}|sample_proceed={}|sample_hold={}|sample_block={}|status={}|reason={}|packet_registry_loaded=0|shadow_only=1|process_launch=0|auto_fire_allowed=0|operator_t0_required=1|json=0\n",
+        target,
+        batch,
+        batches,
+        requested_sample,
+        sample,
+        hbp_escape(&matched),
+        hbp_escape(&mismatched),
+        hbp_escape(&proceed),
+        hbp_escape(&hold),
+        hbp_escape(&block),
+        status,
+        reason
+    )
+}
+
 fn handle_client(
     mut stream: TcpStream,
     room: &Room,
@@ -1397,6 +1480,10 @@ fn handle_client(
         "/shadow-parity.hbp" => {
             let gnn_score_q = gnn.preview_latest_score_q().unwrap_or(0);
             ("200 OK", render_shadow_parity(book, config, gnn_score_q, query))
+        }
+        "/replay-prep.hbp" => {
+            let gnn_score_q = gnn.preview_latest_score_q().unwrap_or(0);
+            ("200 OK", render_replay_prep(book, config, gnn_score_q, query))
         }
         "/seat.hbp" => {
             let handle = query_param(query, "h").unwrap_or_default();
@@ -1836,5 +1923,44 @@ mod tests {
         assert_eq!(out.matches("HOST8SHADOWROW|").count(), 2);
         assert!(out.contains("process_launch=0"));
         assert!(!out.contains("fire=1"));
+    }
+
+    #[test]
+    fn replay_prep_estimates_100b_batches_but_keeps_fire_gated() {
+        let (book, config) = launch_plan_test_fixture();
+        let out = render_replay_prep(
+            &book,
+            &config,
+            0,
+            "target=100000000000&batch=10000&sample=1&device=acer&ts=1750000000&score=800&risk=10",
+        );
+        assert!(out.contains("HOST8REPLAYPREP|"));
+        assert!(out.contains("target_total=100000000000"));
+        assert!(out.contains("batch_size=10000"));
+        assert!(out.contains("estimated_batches=10000000"));
+        assert!(out.contains("sample_requested=1"));
+        assert!(out.contains("sample_checked=1"));
+        assert!(out.contains("sample_matched=1"));
+        assert!(out.contains("sample_mismatched=0"));
+        assert!(out.contains("status=READY_FOR_PACKET_REGISTRY_REPLAY"));
+        assert!(out.contains("packet_registry_loaded=0"));
+        assert!(out.contains("shadow_only=1"));
+        assert!(out.contains("process_launch=0"));
+        assert!(out.contains("auto_fire_allowed=0"));
+        assert!(out.contains("operator_t0_required=1"));
+        assert!(out.contains("json=0"));
+        assert!(!out.contains('{'));
+        assert!(!out.contains('}'));
+    }
+
+    #[test]
+    fn replay_prep_blocks_empty_sample() {
+        let book = SeatBook::default();
+        let (_, config) = launch_plan_test_fixture();
+        let out = render_replay_prep(&book, &config, 0, "target=100&batch=10&sample=5");
+        assert!(out.contains("sample_checked=0"));
+        assert!(out.contains("status=BLOCKED_NO_SEATS"));
+        assert!(out.contains("auto_fire_allowed=0"));
+        assert!(out.contains("process_launch=0"));
     }
 }
