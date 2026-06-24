@@ -1,6 +1,7 @@
 FISCHERPORTRECEIPT|date=2026-06-24|colony=liris|crate=servers/fischer-eval|kind=rust-host8-additive|json=0|cutover=0
 FISCHERPORTMEASURE|live_fischer=127.0.0.1:4794|live_status=FISCHER-LIVE_ok_json0|node_ground_truth_tests=26/26_pass|json=0
-FISCHERPORTMEASURE|rust_check=cargo_check_tests_pass|runtime_test=blocked_missing_link_exe|fmt=blocked_missing_rustfmt_component|json_scan=clean|json=0
+FISCHERPORTMEASURE|rust_check=cargo_1_81_check_fischer_tests_pass|fmt=cargo_1_81_fmt_all_check_pass|workspace_check=blocked_missing_link_exe_on_dependency_build_scripts|runtime_test=blocked_missing_link_exe|json_scan=clean|json=0
+FISCHERPORTMEASURE|clippy=cargo_1_81_clippy_fischer_tests_d_warnings_pass|acer_attack_verify=issuecomment_4790181614|fixes=hard_eval_spec,sha256_word_load_iterator|json=0
 FISCHERPORTSEMANTICS|pipeline=VERIFY-FISCHER-EVAL-HOOKWALL-ROUTE|verdicts=PROCEED,HOLD,ANALYZE,BLOCK,REFUTE|tiers=glsm,illegal,refute,cpl|self_authorizes=0|cosign_appends=0|json=0
 FISCHERPORTMAPNOTE|cross_level=1|levels=op,council,supervisor,agent,route,omni-system|hilbra_atlas_omni_maps=separate_surfaces|json=0
 FISCHERPORTFABRICASK|attempted=1|ok=0|reason=all_bases_unavailable_or_cooldown|cube_feed_claimed=0|json=0

@@ -38,13 +38,13 @@ pub mod crypto;
 pub mod envelope;
 pub mod frame_alloc;
 pub mod hookwall;
-/// Cross-host/colony link auth — shared-secret HMAC + owner-human-PID consent gate. The key value
-/// is loaded at runtime (local secret file), NEVER hardcoded/committed; verb is bound into the sig.
-pub mod link_auth;
 /// Corpus access-LEVEL tagger — assigns each recall/atlas row a level (PII -> owner-private,
 /// public-canon -> level 0, else federation). Pairs with link_auth::effective_level so the public
 /// "search engine for agents" tier is PROVABLY PII-free. Pure/E=0.
 pub mod level_tag;
+/// Cross-host/colony link auth — shared-secret HMAC + owner-human-PID consent gate. The key value
+/// is loaded at runtime (local secret file), NEVER hardcoded/committed; verb is bound into the sig.
+pub mod link_auth;
 pub mod pid;
 pub mod syscall;
 pub mod vfs;

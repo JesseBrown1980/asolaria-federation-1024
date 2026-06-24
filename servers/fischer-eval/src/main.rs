@@ -286,7 +286,11 @@ fn percent_decode(s: &str) -> String {
                 continue;
             }
         }
-        out.push(if bytes[i] == b'+' { ' ' } else { bytes[i] as char });
+        out.push(if bytes[i] == b'+' {
+            ' '
+        } else {
+            bytes[i] as char
+        });
         i += 1;
     }
     out

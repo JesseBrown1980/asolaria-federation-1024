@@ -2,9 +2,9 @@ use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::Path;
 use std::process;
 use std::process::Command;
-use std::path::Path;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
@@ -122,7 +122,10 @@ fn main() {
     // separate per-layer DispatchCounters surfaced in HOST8LIBS. E=0: registration/counting only.
     let mut registry = AgentRegistry::new();
     if config.once {
-        print!("{}", render_feed(&room, &config, &book, started, &mut gnn, &registry));
+        print!(
+            "{}",
+            render_feed(&room, &config, &book, started, &mut gnn, &registry)
+        );
         return;
     }
 
@@ -154,9 +157,15 @@ fn main() {
 
     for stream in listener.incoming() {
         match stream {
-            Ok(stream) => {
-                handle_client(stream, &room, &config, &book, started, &mut gnn, &mut registry)
-            }
+            Ok(stream) => handle_client(
+                stream,
+                &room,
+                &config,
+                &book,
+                started,
+                &mut gnn,
+                &mut registry,
+            ),
             Err(error) => eprintln!("HOST8ERR|accept={}|json=0", hbp_escape(error.to_string())),
         }
     }
@@ -200,8 +209,7 @@ where
             .unwrap_or_else(|_| DEFAULT_VERB_CATALOG.to_string()),
         summon_root: env::var("GAIA_SUMMON_ROOT")
             .unwrap_or_else(|_| DEFAULT_SUMMON_ROOT.to_string()),
-        summon_model: env::var("SUMMON_MODEL")
-            .unwrap_or_else(|_| DEFAULT_SUMMON_MODEL.to_string()),
+        summon_model: env::var("SUMMON_MODEL").unwrap_or_else(|_| DEFAULT_SUMMON_MODEL.to_string()),
         opencode_js_bin: env::var("OPENCODE_JS_BIN")
             .unwrap_or_else(|_| DEFAULT_OPENCODE_JS_BIN.to_string()),
     };
@@ -282,11 +290,13 @@ fn load_room_stub(path: &str) -> Option<Room> {
     Some(Room {
         id,
         room_stub,
-        target_runtime: hbp_field(&body, "target_runtime").unwrap_or_else(|| "8byte-rust-host".to_string()),
+        target_runtime: hbp_field(&body, "target_runtime")
+            .unwrap_or_else(|| "8byte-rust-host".to_string()),
         legacy_runtime: hbp_field(&body, "legacy_runtime").unwrap_or_else(|| "node".to_string()),
         legacy_path: hbp_field(&body, "legacy_path").unwrap_or_default(),
         lane: hbp_field(&body, "lane").unwrap_or_else(|| "retire-or-host8".to_string()),
-        swap_gate: hbp_field(&body, "swap_gate").unwrap_or_else(|| "parity-before-retire".to_string()),
+        swap_gate: hbp_field(&body, "swap_gate")
+            .unwrap_or_else(|| "parity-before-retire".to_string()),
         host_handle8,
     })
 }
@@ -355,9 +365,8 @@ fn seat_from_row(line: &str, source: &str) -> Option<Seat> {
     // The human name is field index 1 (right after the row tag) for the combined
     // shapes (FORMULA|<name>|..., CHIEF|<name>|..., SOS|<name>|..., PROF|<name>|...).
     // For the feed REG rows the name lives in `name=<n>`.
-    let name = row_value(line, "name").unwrap_or_else(|| {
-        line.split('|').nth(1).unwrap_or("").trim().to_string()
-    });
+    let name = row_value(line, "name")
+        .unwrap_or_else(|| line.split('|').nth(1).unwrap_or("").trim().to_string());
     Some(Seat {
         name,
         handle8,
@@ -393,12 +402,7 @@ fn seat_from_per_seat_file(body: &str, source: &str) -> Option<Seat> {
             "NAME" => name = rest.trim().to_string(),
             // PID|<handle>|birth=... — handle is the first sub-field.
             "PID" => {
-                handle8 = rest
-                    .split('|')
-                    .next()
-                    .unwrap_or("")
-                    .trim()
-                    .to_lowercase();
+                handle8 = rest.split('|').next().unwrap_or("").trim().to_lowercase();
             }
             "HILBERT" => hilbert = rest.split('|').next().unwrap_or("").trim().to_string(),
             "LAYER" => layer = rest.split('|').next().unwrap_or("").trim().to_string(),
@@ -443,9 +447,11 @@ fn load_seats(office_dir: &str, feed_dir: &str) -> SeatBook {
                 p.extension().map(|x| x == "hbp").unwrap_or(false)
                     && p.file_name()
                         .and_then(|n| n.to_str())
-                        .map(|n| n.starts_with("sup-")
-                            || n.starts_with("agent-")
-                            || n.contains("FORMULA-CORPUS"))
+                        .map(|n| {
+                            n.starts_with("sup-")
+                                || n.starts_with("agent-")
+                                || n.contains("FORMULA-CORPUS")
+                        })
                         .unwrap_or(false)
             })
             .collect();
@@ -612,7 +618,12 @@ fn load_verb_catalog(path: &str) -> Vec<String> {
 ///   noun  = seat name
 ///   glyph = sha16("glyph|"+noun+"|"+cube_bh)
 ///   sha   = handle8
-fn tuple60d(name: &str, handle8: &str, cube_bh: &str, verb_catalog: &[String]) -> (String, String, String, String) {
+fn tuple60d(
+    name: &str,
+    handle8: &str,
+    cube_bh: &str,
+    verb_catalog: &[String],
+) -> (String, String, String, String) {
     let noun = name.to_string();
     let verb = if verb_catalog.is_empty() {
         "report".to_string()
@@ -697,7 +708,13 @@ fn load_observed_frame(path: &str) -> Option<ObservedFrame> {
         .and_then(|v| parse_u64_field(&v))
         .or_else(|| hbp_field(line, "pid").map(|pid| fnv1a64(&pid)))
         .unwrap_or(0);
-    Some(ObservedFrame { tick, phash, frame_delta, entropy_q, pid_fingerprint })
+    Some(ObservedFrame {
+        tick,
+        phash,
+        frame_delta,
+        entropy_q,
+        pid_fingerprint,
+    })
 }
 
 fn render_feed(
@@ -727,7 +744,10 @@ fn render_feed(
     let public_to_secret = check_transit(AccessTier::Public, AccessTier::Secret)
         .map(|verdict| verdict.authorized)
         .unwrap_or(false);
-    let room_stub_source = config.room_stub_path.as_deref().unwrap_or("default-embedded");
+    let room_stub_source = config
+        .room_stub_path
+        .as_deref()
+        .unwrap_or("default-embedded");
 
     [
         format!(
@@ -863,7 +883,10 @@ fn render_count(book: &SeatBook) -> String {
 }
 
 fn render_not_found(path: &str) -> String {
-    format!("HOST8ERR|status=404|path={}|reason=not_found|json=0\n", hbp_escape(path))
+    format!(
+        "HOST8ERR|status=404|path={}|reason=not_found|json=0\n",
+        hbp_escape(path)
+    )
 }
 
 /// Fire the PROVEN $0 opencode path for ONE summon: a unique room dir = fresh
@@ -968,7 +991,11 @@ fn render_summon(book: &SeatBook, config: &Config, query: &str) -> (bool, String
     let handle = query_param(query, "h").unwrap_or_default().to_lowercase();
     let device = {
         let d = query_param(query, "device").unwrap_or_default();
-        if d.is_empty() { "acer".to_string() } else { d }
+        if d.is_empty() {
+            "acer".to_string()
+        } else {
+            d
+        }
     };
     // ts: explicit &ts= wins (lets parity be reproduced), else server unix seconds.
     let ts = query_param(query, "ts")
@@ -989,9 +1016,9 @@ fn render_summon(book: &SeatBook, config: &Config, query: &str) -> (bool, String
         }
     };
 
-    let (verb, noun, glyph, sha) =
-        tuple60d(&seat.name, &seat.handle8, &seat.cube_bh, &book.verbs);
-    let instance_pid = resolve_instance_pid(&seat.handle8, &device, &ts, &verb, &noun, &glyph, &sha);
+    let (verb, noun, glyph, sha) = tuple60d(&seat.name, &seat.handle8, &seat.cube_bh, &book.verbs);
+    let instance_pid =
+        resolve_instance_pid(&seat.handle8, &device, &ts, &verb, &noun, &glyph, &sha);
 
     // fire path: unique dir keyed by instance_pid (fresh session = $0). OFF by default.
     let (fired, cost, exit, response) = if fire {
@@ -1132,7 +1159,12 @@ fn seal_hex(row: &[u8; 16]) -> String {
 ///   -> spawn-gate ring verdict (kernel spawn_gate::spawn_gate_verdict, BLOCK>HOLD>PROCEED) -> sealed
 /// HBP receipt. It NEVER fires: `process_launch=0` ALWAYS. It only reports whether a fire WOULD be
 /// permitted (`fire_allowed=1` iff the gate PROCEEDs). The actual gated fire stays in the summon path.
-fn render_launch_plan(book: &SeatBook, _config: &Config, gnn_score_q: u32, query: &str) -> (bool, String) {
+fn render_launch_plan(
+    book: &SeatBook,
+    _config: &Config,
+    gnn_score_q: u32,
+    query: &str,
+) -> (bool, String) {
     let handle = query_param(query, "h").unwrap_or_default().to_lowercase();
     let device = {
         let d = query_param(query, "device").unwrap_or_default();
@@ -1160,7 +1192,8 @@ fn render_launch_plan(book: &SeatBook, _config: &Config, gnn_score_q: u32, query
     };
 
     let (verb, noun, glyph, sha) = tuple60d(&seat.name, &seat.handle8, &seat.cube_bh, &book.verbs);
-    let instance_pid = resolve_instance_pid(&seat.handle8, &device, &ts, &verb, &noun, &glyph, &sha);
+    let instance_pid =
+        resolve_instance_pid(&seat.handle8, &device, &ts, &verb, &noun, &glyph, &sha);
 
     // 1. C/D room routing (rooms.rs): agent rooms rotate on C: (rename-before-load = $0).
     let room_id = room_id_from_pid(&instance_pid);
@@ -1237,7 +1270,8 @@ fn render_summon_batch(book: &SeatBook, config: &Config, gnn_score_q: u32, query
     let n = requested.min(MAX_BATCH).min(book.seats.len());
 
     let mut lines = String::new();
-    let (mut proceed, mut hold, mut block, mut c_rooms, mut d_rooms) = (0usize, 0usize, 0usize, 0usize, 0usize);
+    let (mut proceed, mut hold, mut block, mut c_rooms, mut d_rooms) =
+        (0usize, 0usize, 0usize, 0usize, 0usize);
     for seat in book.seats.iter().take(n) {
         let sub_query = format!(
             "h={}&role={}&score={}&risk={}",
@@ -1498,7 +1532,8 @@ fn load_100b_registry_stats(registry_dir: &str, chunk_limit: Option<u128>) -> Re
     };
     stats.checkpoint_processed = json_u128_field(&checkpoint, "processedPackets").unwrap_or(0);
     stats.checkpoint_target = json_u128_field(&checkpoint, "targetPackets").unwrap_or(0);
-    stats.checkpoint_completed_chunks = json_u128_field(&checkpoint, "completedChunks").unwrap_or(0);
+    stats.checkpoint_completed_chunks =
+        json_u128_field(&checkpoint, "completedChunks").unwrap_or(0);
     stats.checkpoint_status =
         json_string_field(&checkpoint, "status").unwrap_or_else(|| "missing".to_string());
     stats.checkpoint_last_pid =
@@ -1730,9 +1765,10 @@ fn handle_client(
         None => (target, ""),
     };
     let (status, body) = match path {
-        "/" | "/health.hbp" | "/room.hbp" | "/feed.hbp" => {
-            ("200 OK", render_feed(room, config, book, started, gnn, registry))
-        }
+        "/" | "/health.hbp" | "/room.hbp" | "/feed.hbp" => (
+            "200 OK",
+            render_feed(room, config, book, started, gnn, registry),
+        ),
         "/seats.hbp" => ("200 OK", render_seats(book)),
         "/count.hbp" => ("200 OK", render_count(book)),
         "/summon.hbp" => {
@@ -1748,15 +1784,24 @@ fn handle_client(
         }
         "/summon-batch.hbp" => {
             let gnn_score_q = gnn.preview_latest_score_q().unwrap_or(0);
-            ("200 OK", render_summon_batch(book, config, gnn_score_q, query))
+            (
+                "200 OK",
+                render_summon_batch(book, config, gnn_score_q, query),
+            )
         }
         "/shadow-parity.hbp" => {
             let gnn_score_q = gnn.preview_latest_score_q().unwrap_or(0);
-            ("200 OK", render_shadow_parity(book, config, gnn_score_q, query))
+            (
+                "200 OK",
+                render_shadow_parity(book, config, gnn_score_q, query),
+            )
         }
         "/replay-prep.hbp" => {
             let gnn_score_q = gnn.preview_latest_score_q().unwrap_or(0);
-            ("200 OK", render_replay_prep(book, config, gnn_score_q, query))
+            (
+                "200 OK",
+                render_replay_prep(book, config, gnn_score_q, query),
+            )
         }
         "/seat.hbp" => {
             let handle = query_param(query, "h").unwrap_or_default();
@@ -1800,7 +1845,8 @@ mod tests {
 
     #[test]
     fn host_handle8_is_eight_bytes_hex() {
-        let handle = host_handle8("gnn-dispatch-bridge|rooms/task-manager/bridge/gnn-dispatch-bridge");
+        let handle =
+            host_handle8("gnn-dispatch-bridge|rooms/task-manager/bridge/gnn-dispatch-bridge");
         assert_eq!(handle.len(), 16);
         assert!(handle.chars().all(|ch| ch.is_ascii_hexdigit()));
     }
@@ -1827,7 +1873,14 @@ mod tests {
             opencode_js_bin: DEFAULT_OPENCODE_JS_BIN.to_string(),
         };
         let mut gnn = GnnInference::new();
-        let feed = render_feed(&default_room(), &config, &SeatBook::default(), Instant::now(), &mut gnn, &AgentRegistry::new());
+        let feed = render_feed(
+            &default_room(),
+            &config,
+            &SeatBook::default(),
+            Instant::now(),
+            &mut gnn,
+            &AgentRegistry::new(),
+        );
         assert!(feed.contains("HOST8HDR|"));
         assert!(feed.contains("json=0"));
         assert!(!feed.contains('{'));
@@ -1989,14 +2042,24 @@ mod tests {
             );
             return;
         }
-        let (verb, noun, glyph, sha) =
-            tuple60d(NODE_NAME, NODE_HANDLE8, NODE_CUBE_BH, &verbs);
+        let (verb, noun, glyph, sha) = tuple60d(NODE_NAME, NODE_HANDLE8, NODE_CUBE_BH, &verbs);
         assert_eq!(verb, NODE_VERB, "verb selection must match node");
         assert_eq!(noun, NODE_NAME);
         assert_eq!(glyph, NODE_GLYPH);
         assert_eq!(sha, NODE_HANDLE8);
-        let pid = resolve_instance_pid(NODE_HANDLE8, NODE_DEVICE, NODE_TS, &verb, &noun, &glyph, &sha);
-        assert_eq!(pid, NODE_INSTANCE_PID, "full-chain instance_pid must match node");
+        let pid = resolve_instance_pid(
+            NODE_HANDLE8,
+            NODE_DEVICE,
+            NODE_TS,
+            &verb,
+            &noun,
+            &glyph,
+            &sha,
+        );
+        assert_eq!(
+            pid, NODE_INSTANCE_PID,
+            "full-chain instance_pid must match node"
+        );
     }
 
     #[test]
@@ -2025,7 +2088,11 @@ mod tests {
             summon_model: DEFAULT_SUMMON_MODEL.to_string(),
             opencode_js_bin: DEFAULT_OPENCODE_JS_BIN.to_string(),
         };
-        let (ok, body) = render_summon(&book, &config, "h=0155964ffc8ef1f8&device=acer&ts=1750000000");
+        let (ok, body) = render_summon(
+            &book,
+            &config,
+            "h=0155964ffc8ef1f8&device=acer&ts=1750000000",
+        );
         assert!(ok);
         assert!(body.contains(&format!("instance_pid={}", NODE_INSTANCE_PID)));
         assert!(body.contains("fired=0"));
@@ -2071,8 +2138,12 @@ mod tests {
     fn launch_plan_composes_room_runner_gate_without_firing() {
         let (book, config) = launch_plan_test_fixture();
         // No GNN score (0) => gate HOLDs (genius not cleared) => fire_allowed=0. NEVER launches.
-        let (ok, body) =
-            render_launch_plan(&book, &config, 0, "h=0155964ffc8ef1f8&device=acer&ts=1750000000");
+        let (ok, body) = render_launch_plan(
+            &book,
+            &config,
+            0,
+            "h=0155964ffc8ef1f8&device=acer&ts=1750000000",
+        );
         assert!(ok);
         assert!(body.contains(&format!("instance_pid={}", NODE_INSTANCE_PID)));
         assert!(body.contains("room_id="));
@@ -2241,10 +2312,8 @@ mod tests {
     #[test]
     fn replay_prep_loads_100b_registry_fixture_readonly_and_maps_reverse_gain_to_risk() {
         let (book, config) = launch_plan_test_fixture();
-        let root = std::env::temp_dir().join(format!(
-            "asolaria-100b-registry-fixture-{}",
-            unix_seconds()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("asolaria-100b-registry-fixture-{}", unix_seconds()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
@@ -2294,7 +2363,9 @@ mod tests {
         assert!(out.contains("reverse_risk_mapping=one_minus_reverse_gain"));
         assert!(out.contains("accepted_chunk_kinds=real_100b_chunk,real_100b_accelerated_chunk"));
         assert!(out.contains("HOST8PIPELINE|"));
-        assert!(out.contains("required=gnn,hookwall,reverse_gain_gnn,whiteroom,omnishannon,shannon,omniflywheel"));
+        assert!(out.contains(
+            "required=gnn,hookwall,reverse_gain_gnn,whiteroom,omnishannon,shannon,omniflywheel"
+        ));
         assert!(out.contains("pipeline_verified=0"));
         assert!(out.contains("status=SUPERVISOR_PIPELINE_REQUIRED"));
         assert!(out.contains("process_launch=0"));

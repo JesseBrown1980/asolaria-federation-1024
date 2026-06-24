@@ -11,10 +11,12 @@ It is not a replacement of the live Node runtime yet.
 - `MEASURED`: live Fischer remains reachable at `127.0.0.1:4794` and reports `FISCHER-LIVE|ok=1|...|json=0`.
 - `MEASURED`: Node ground-truth source lives under `C:\Users\rayss\_bigpickle_acer_fischer\src\`.
 - `MEASURED`: Node ground-truth unit suite passes `26/26`.
-- `MEASURED`: Rust `cargo check -p asolaria-server-fischer-eval --tests` passes.
+- `MEASURED`: Rust `cargo +1.81 check -p asolaria-server-fischer-eval --tests` passes.
+- `MEASURED`: Rust `cargo +1.81 clippy -p asolaria-server-fischer-eval --tests -- -D warnings` passes after fixing the two Acer-reported lints.
 - `MEASURED`: static scan of the Rust source found no JSON hot-path markers.
+- `MEASURED`: exact owning fmt gate `cargo +1.81 fmt --all -- --check` passes after applying 1.81 rustfmt to the branch.
+- `MEASURED`: workspace check `cargo +1.81 check --workspace` is blocked on this seat by missing MSVC `link.exe` while compiling dependency build scripts (`proc-macro2`, `quote`).
 - `MEASURED`: `cargo test -p asolaria-server-fischer-eval` is blocked on this seat by missing MSVC `link.exe`.
-- `MEASURED`: `cargo fmt` is blocked on this seat by missing `rustfmt` component.
 - `UNVERIFIED`: executable runtime smoke is pending a build seat with a linker.
 
 ## What Was Ported
@@ -29,6 +31,15 @@ The Rust crate mirrors the `BHFISCHER-KERNEL-v1` evaluator shape from `fischer-k
 - Tier 3: CPL penalties/gains with hard floors.
 - Output: `FISCHERv1|...|json=0|runtime=0|row_hash=...` HBP rows.
 - Safety: no self-authorization and no cosign append.
+
+## Acer Cross-Seat Attack-Verify
+
+`MEASURED`: Acer relayed PR comment `#issuecomment-4790181614`, identifying two clippy blockers that
+Liris could not see because Liris lacks the MSVC linker. This branch fixes both:
+
+- `clippy::too_many_arguments` on the hard-gate return path: replaced with `HardEvalSpec`.
+- `clippy::needless_range_loop` in the inline SHA-256 loader: rewrote the first 16-word load with
+  `iter_mut().take(16).enumerate()`.
 
 ## Cross-Level Placement
 
@@ -45,4 +56,3 @@ separate migration surfaces.
 `MEASURED`: the fabric/council query was attempted for the expanded migration scope and returned
 `ok=false` with fallback `all_bases_unavailable` / cooldown. No cube-feed or council ratification is
 claimed from this branch.
-

@@ -77,7 +77,14 @@ const PII_PATH_FRAGMENTS: &[&str] = &[
 
 /// Content fragments that mark a row owner-private (financial / legal / customer PII).
 const PII_CONTENT_FRAGMENTS: &[&str] = &[
-    "cnpj", "cpf ", "paypal", "zelle", "refund complaint", "customer care", "passport no", "invoice #",
+    "cnpj",
+    "cpf ",
+    "paypal",
+    "zelle",
+    "refund complaint",
+    "customer care",
+    "passport no",
+    "invoice #",
 ];
 
 /// Path fragments explicitly cleared as PUBLIC canon (maps / addressing / reductions / public docs).
@@ -197,33 +204,51 @@ mod tests {
     fn cnpj_content_is_owner_private_even_on_a_neutral_path() {
         // A 14-digit CNPJ in the body → private regardless of path.
         assert_eq!(
-            assign_level("C:/x/reports/qdd.md", "order for CNPJ 11222333000181 placed"),
+            assign_level(
+                "C:/x/reports/qdd.md",
+                "order for CNPJ 11222333000181 placed"
+            ),
             LEVEL_OWNER_PRIVATE
         );
-        assert_eq!(assign_level("C:/x/notes.md", "paypal payment to ..."), LEVEL_OWNER_PRIVATE);
+        assert_eq!(
+            assign_level("C:/x/notes.md", "paypal payment to ..."),
+            LEVEL_OWNER_PRIVATE
+        );
     }
 
     #[test]
     fn public_canon_path_is_level_public() {
         assert_eq!(
-            assign_level("reports/asolaria-multi-cylinder-v2.html", "cylinders / pipes / surfaces"),
+            assign_level(
+                "reports/asolaria-multi-cylinder-v2.html",
+                "cylinders / pipes / surfaces"
+            ),
             LEVEL_PUBLIC
         );
-        assert_eq!(assign_level("docs/what-is-asolaria.md", "addressing geometry"), LEVEL_PUBLIC);
+        assert_eq!(
+            assign_level("docs/what-is-asolaria.md", "addressing geometry"),
+            LEVEL_PUBLIC
+        );
     }
 
     #[test]
     fn pii_always_beats_public_canon_naming() {
         // A public-canon-NAMED file that nonetheless carries PII must NOT be public.
         assert_eq!(
-            assign_level("reports/asolaria-real-model.html", "leaked: zelle transfer ..."),
+            assign_level(
+                "reports/asolaria-real-model.html",
+                "leaked: zelle transfer ..."
+            ),
             LEVEL_OWNER_PRIVATE
         );
     }
 
     #[test]
     fn unknown_row_is_federation_not_public() {
-        assert_eq!(assign_level("C:/x/internal/thing.hbp", "no pii, not canon"), LEVEL_FEDERATION);
+        assert_eq!(
+            assign_level("C:/x/internal/thing.hbp", "no pii, not canon"),
+            LEVEL_FEDERATION
+        );
     }
 
     #[test]
@@ -244,7 +269,11 @@ mod tests {
             ("x/.asolaria/recall.key", "secret"),
         ];
         for (p, c) in pii_rows {
-            assert_ne!(assign_level(p, c), LEVEL_PUBLIC, "PII row leaked to public: {p}");
+            assert_ne!(
+                assign_level(p, c),
+                LEVEL_PUBLIC,
+                "PII row leaked to public: {p}"
+            );
         }
     }
 
@@ -265,12 +294,24 @@ mod tests {
             "C:/asolaria-acer/packages/dashboard/.../pdf-claude-secret-settings.txt",
         ];
         for p in must_be_private {
-            assert_eq!(assign_level(p, ""), LEVEL_OWNER_PRIVATE, "still leaking (not owner-private): {p}");
+            assert_eq!(
+                assign_level(p, ""),
+                LEVEL_OWNER_PRIVATE,
+                "still leaking (not owner-private): {p}"
+            );
         }
         // And the public-canon docs must STILL be public (the expansion must not over-privatize them).
-        for p in ["C:/asolaria-acer/README.md", "C:/Users/acer/Asolaria/BROWN-HILBERT.md",
-                  "reports/asolaria-multi-cylinder-v2.html", "docs/what-is-asolaria.md"] {
-            assert_eq!(assign_level(p, "clean canon body"), LEVEL_PUBLIC, "canon wrongly privatized: {p}");
+        for p in [
+            "C:/asolaria-acer/README.md",
+            "C:/Users/acer/Asolaria/BROWN-HILBERT.md",
+            "reports/asolaria-multi-cylinder-v2.html",
+            "docs/what-is-asolaria.md",
+        ] {
+            assert_eq!(
+                assign_level(p, "clean canon body"),
+                LEVEL_PUBLIC,
+                "canon wrongly privatized: {p}"
+            );
         }
     }
 }

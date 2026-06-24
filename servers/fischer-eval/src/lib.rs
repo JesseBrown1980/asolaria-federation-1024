@@ -131,6 +131,18 @@ pub struct FischerEval {
     pub composite: String,
 }
 
+struct HardEvalSpec {
+    pid: String,
+    move_name: String,
+    verdict: FischerVerdict,
+    cpl: i32,
+    flags: Vec<&'static str>,
+    best_alt: &'static str,
+    candidate_count: u8,
+    voxel_coord: String,
+    g4_state: String,
+}
+
 pub fn evaluate(envelope: &FischerEnvelope, score: &FischerScore, strict: bool) -> FischerEval {
     let pid = envelope
         .pid
@@ -152,59 +164,67 @@ pub fn evaluate(envelope: &FischerEnvelope, score: &FischerScore, strict: bool) 
 
     if g4_state == "MISTAKE_FLAGGED" {
         return hard_eval(
-            pid,
-            move_name,
-            FischerVerdict::Block,
-            999,
-            vec!["glsm_mistake_flagged"],
-            "analyze_in_white_room",
-            derive_candidate_count(&envelope.verb),
-            voxel_coord,
-            g4_state,
+            HardEvalSpec {
+                pid,
+                move_name,
+                verdict: FischerVerdict::Block,
+                cpl: 999,
+                flags: vec!["glsm_mistake_flagged"],
+                best_alt: "analyze_in_white_room",
+                candidate_count: derive_candidate_count(&envelope.verb),
+                voxel_coord,
+                g4_state,
+            },
             score,
         );
     }
 
     if envelope.pid.as_deref().unwrap_or("").is_empty() {
         return hard_eval(
-            pid,
-            move_name,
-            FischerVerdict::Block,
-            500,
-            vec!["missing_pid"],
-            derive_best_alt(&["missing_pid"], &envelope.verb, &g4_state),
-            derive_candidate_count(&envelope.verb),
-            voxel_coord,
-            g4_state,
+            HardEvalSpec {
+                pid,
+                move_name,
+                verdict: FischerVerdict::Block,
+                cpl: 500,
+                flags: vec!["missing_pid"],
+                best_alt: derive_best_alt(&["missing_pid"], &envelope.verb, &g4_state),
+                candidate_count: derive_candidate_count(&envelope.verb),
+                voxel_coord,
+                g4_state,
+            },
             score,
         );
     }
     if envelope.verb.is_empty() {
         return hard_eval(
-            pid,
-            move_name,
-            FischerVerdict::Block,
-            500,
-            vec!["missing_verb"],
-            derive_best_alt(&["missing_verb"], &envelope.verb, &g4_state),
-            derive_candidate_count(&envelope.verb),
-            voxel_coord,
-            g4_state,
+            HardEvalSpec {
+                pid,
+                move_name,
+                verdict: FischerVerdict::Block,
+                cpl: 500,
+                flags: vec!["missing_verb"],
+                best_alt: derive_best_alt(&["missing_verb"], &envelope.verb, &g4_state),
+                candidate_count: derive_candidate_count(&envelope.verb),
+                voxel_coord,
+                g4_state,
+            },
             score,
         );
     }
 
     if check_refuted(envelope) {
         return hard_eval(
-            pid,
-            move_name,
-            FischerVerdict::Refute,
-            999,
-            vec!["refuted_pattern"],
-            "halt_and_request_human_apex",
-            derive_candidate_count(&envelope.verb),
-            voxel_coord,
-            g4_state,
+            HardEvalSpec {
+                pid,
+                move_name,
+                verdict: FischerVerdict::Refute,
+                cpl: 999,
+                flags: vec!["refuted_pattern"],
+                best_alt: "halt_and_request_human_apex",
+                candidate_count: derive_candidate_count(&envelope.verb),
+                voxel_coord,
+                g4_state,
+            },
             score,
         );
     }
@@ -246,35 +266,24 @@ pub fn evaluate(envelope: &FischerEnvelope, score: &FischerScore, strict: bool) 
     }
 }
 
-fn hard_eval(
-    pid: String,
-    move_name: String,
-    verdict: FischerVerdict,
-    cpl: i32,
-    flags: Vec<&'static str>,
-    best_alt: &'static str,
-    candidate_count: u8,
-    voxel_coord: String,
-    g4_state: String,
-    score: &FischerScore,
-) -> FischerEval {
+fn hard_eval(spec: HardEvalSpec, score: &FischerScore) -> FischerEval {
     FischerEval {
-        pid,
-        move_name,
-        verdict,
-        cpl,
-        flags,
+        pid: spec.pid,
+        move_name: spec.move_name,
+        verdict: spec.verdict,
+        cpl: spec.cpl,
+        flags: spec.flags,
         axes: AxisScores {
             king_safety: 0.0,
             center_gain: 0.0,
             proof_gain: 0.0,
             authority_debt: 2,
         },
-        best_alt,
-        candidate_count,
-        glyph: verdict.glyph(),
-        voxel_coord,
-        g4_state,
+        best_alt: spec.best_alt,
+        candidate_count: spec.candidate_count,
+        glyph: spec.verdict.glyph(),
+        voxel_coord: spec.voxel_coord,
+        g4_state: spec.g4_state,
         pass: false,
         promoted: false,
         l0_real: score.l0_real,
@@ -517,9 +526,9 @@ fn sha256(input: &[u8]) -> [u8; 32] {
 
     for chunk in msg.chunks_exact(64) {
         let mut w = [0u32; 64];
-        for i in 0..16 {
+        for (i, word) in w.iter_mut().take(16).enumerate() {
             let j = i * 4;
-            w[i] = u32::from_be_bytes([chunk[j], chunk[j + 1], chunk[j + 2], chunk[j + 3]]);
+            *word = u32::from_be_bytes([chunk[j], chunk[j + 1], chunk[j + 2], chunk[j + 3]]);
         }
         for i in 16..64 {
             let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
@@ -666,11 +675,17 @@ fn bit(value: bool) -> u8 {
 }
 
 fn is_write_verb(v: &str) -> bool {
-    matches!(v, "write" | "delete" | "compact" | "seal" | "upsert" | "drop" | "migrate")
+    matches!(
+        v,
+        "write" | "delete" | "compact" | "seal" | "upsert" | "drop" | "migrate"
+    )
 }
 
 fn is_spawn_verb(v: &str) -> bool {
-    matches!(v, "spawn" | "scale" | "mint" | "fork" | "launch" | "bootstrap")
+    matches!(
+        v,
+        "spawn" | "scale" | "mint" | "fork" | "launch" | "bootstrap"
+    )
 }
 
 fn is_compact_verb(v: &str) -> bool {
@@ -678,7 +693,10 @@ fn is_compact_verb(v: &str) -> bool {
 }
 
 fn is_cosign_required(v: &str) -> bool {
-    matches!(v, "promote" | "mint" | "seal" | "authorize" | "cosign" | "scale")
+    matches!(
+        v,
+        "promote" | "mint" | "seal" | "authorize" | "cosign" | "scale"
+    )
 }
 
 fn is_refuted_verb(v: &str) -> bool {
@@ -739,11 +757,7 @@ mod tests {
 
     #[test]
     fn block_on_missing_pid() {
-        let r = evaluate(
-            &clean(|env| env.pid = None),
-            &clean_score(),
-            false,
-        );
+        let r = evaluate(&clean(|env| env.pid = None), &clean_score(), false);
         assert_eq!(r.cpl, 500);
         assert_eq!(r.verdict, FischerVerdict::Block);
         assert!(r.flags.contains(&"missing_pid"));
