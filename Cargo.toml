@@ -24,6 +24,7 @@ members = [
     "servers/cosign-ledger",
     "servers/host8-serve",
     "servers/fischer-eval",
+    "tools/recall-serve",
 ]
 
 [workspace.package]
