@@ -23,6 +23,7 @@ members = [
     "servers/gnn-oracle",
     "servers/cosign-ledger",
     "servers/host8-serve",
+    "servers/fischer-eval",
     "tools/recall-serve",
 ]
 
