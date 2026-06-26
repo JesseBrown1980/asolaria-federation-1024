@@ -24,6 +24,8 @@ members = [
     "servers/cosign-ledger",
     "servers/host8-serve",
     "servers/fischer-eval",
+    "servers/vote-quorum",
+    "servers/council-serve",
     "tools/recall-serve",
 ]
 
