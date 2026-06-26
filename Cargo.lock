@@ -58,6 +58,13 @@ name = "asolaria-server-tier-policy"
 version = "0.1.0"
 
 [[package]]
+name = "asolaria-server-vote-quorum"
+version = "0.1.0"
+dependencies = [
+ "sha2",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
