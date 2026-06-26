@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use asolaria_server_cosign_ledger::py_parity::{ResumeState, LAW_ANCHOR};
+use asolaria_server_cosign_ledger::py_parity::LAW_ANCHOR;
 
 mod http;
 mod resume;
