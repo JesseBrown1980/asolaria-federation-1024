@@ -28,7 +28,19 @@ pub fn route(shared: &Arc<Shared>, method: &str, path: &str, _query: &str) -> (u
         ("GET", "/api/vote-quorum/parity") => parity(shared),
         ("GET", "/api/council/status") => (
             200,
-            String::from("COUNCILSTATUS|ok=1|responder=live|engine=gated|cutover=false|json=0\n"),
+            String::from("COUNCILSTATUS|ok=1|responder=live|engine=gated|loop_routes=read_only_staged|cutover=false|json=0\n"),
+        ),
+        ("GET", "/api/loop/pending") => (
+            200,
+            String::from("LOOPPENDING|ok=1|status=staged|read_only=true|pending_count=unknown|source=loop_ledger_unwired|auto_fire_allowed=false|cutover=false|json=0\n"),
+        ),
+        ("GET", "/api/loop/tick") => (
+            200,
+            String::from("LOOPTICK|ok=1|status=staged|read_only=true|tick_executed=false|process_launch=0|auto_fire=false|spawner_emit=false|cutover=false|json=0\n"),
+        ),
+        ("GET", "/api/loop/veto") => (
+            200,
+            String::from("LOOPVETO|ok=1|status=staged|read_only=true|veto_submitted=false|operator_witness_required=true|cutover=false|json=0\n"),
         ),
         _ => (
             404,
@@ -123,6 +135,34 @@ mod tests {
                 404,
                 "no write/fire route: {p}"
             );
+        }
+    }
+
+    #[test]
+    fn loop_routes_are_read_only_staged_json0() {
+        let sh = Arc::new(Shared {
+            vote_dir: PathBuf::from("."),
+        });
+        for p in ["/api/loop/pending", "/api/loop/tick", "/api/loop/veto"] {
+            let (code, body) = route(&sh, "GET", p, "");
+            assert_eq!(code, 200, "{p}");
+            assert!(body.contains("read_only=true"), "{p}: {body}");
+            assert!(body.contains("cutover=false"), "{p}: {body}");
+            assert!(body.ends_with("json=0\n"), "{p}: {body}");
+            assert!(!body.contains('{'), "{p}: {body}");
+        }
+    }
+
+    #[test]
+    fn mutating_loop_routes_are_not_wired() {
+        let sh = Arc::new(Shared {
+            vote_dir: PathBuf::from("."),
+        });
+        for p in ["/api/loop/pending", "/api/loop/tick", "/api/loop/veto"] {
+            let (code, body) = route(&sh, "POST", p, "");
+            assert_eq!(code, 404, "{p}");
+            assert!(body.contains("error=unknown_route"));
+            assert!(body.ends_with("json=0\n"));
         }
     }
 
