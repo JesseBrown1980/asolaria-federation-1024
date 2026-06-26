@@ -1,0 +1,15 @@
+[package]
+name = "asolaria-server-council-serve"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+authors = ["Asolaria Federation"]
+description = "Asolaria council/loop Host-8 responder bin (:5090) — thread-per-conn, json=0; read-only vote-quorum parity/health + a GATED engine-drive own-thread (process_launch=0, auto_fire=false). STAGED, no cutover."
+
+[[bin]]
+name = "council-serve"
+path = "src/main.rs"
+
+[dependencies]
+asolaria-server-vote-quorum = { path = "../vote-quorum" }
