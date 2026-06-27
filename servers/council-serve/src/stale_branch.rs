@@ -127,9 +127,15 @@ mod tests {
 
     #[test]
     fn recommend_fresh_is_ready() {
-        assert_eq!(recommend(Freshness::Fresh, Some(false)).0, RefreshAction::Ready);
+        assert_eq!(
+            recommend(Freshness::Fresh, Some(false)).0,
+            RefreshAction::Ready
+        );
         // even if "conflicting" is mis-set, fresh short-circuits to ready
-        assert_eq!(recommend(Freshness::Fresh, Some(true)).0, RefreshAction::Ready);
+        assert_eq!(
+            recommend(Freshness::Fresh, Some(true)).0,
+            RefreshAction::Ready
+        );
         // and fresh does not require conflict status.
         assert_eq!(recommend(Freshness::Fresh, None).0, RefreshAction::Ready);
     }
@@ -164,7 +170,10 @@ mod tests {
 
     #[test]
     fn recommend_missing_data_blocks() {
-        assert_eq!(recommend(Freshness::Unknown, Some(false)).0, RefreshAction::Block);
+        assert_eq!(
+            recommend(Freshness::Unknown, Some(false)).0,
+            RefreshAction::Block
+        );
         assert_eq!(recommend(Freshness::Stale, None).0, RefreshAction::Block);
         assert_eq!(recommend(Freshness::Diverged, None).0, RefreshAction::Block);
     }

@@ -834,8 +834,8 @@ mod branch_freshness_route_tests {
 
     #[test]
     fn parse_branch_rejects_negative_or_fractional_counts() {
-        let neg = parse_branch(r#"{"id":"b1","ahead_by":-1,"behind_by":0,"conflicting":false}"#)
-            .unwrap();
+        let neg =
+            parse_branch(r#"{"id":"b1","ahead_by":-1,"behind_by":0,"conflicting":false}"#).unwrap();
         assert_eq!(neg.ahead_by, None);
         let frac = parse_branch(r#"{"id":"b2","ahead_by":1.5,"behind_by":0,"conflicting":false}"#)
             .unwrap();
