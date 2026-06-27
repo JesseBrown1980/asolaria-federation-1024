@@ -11,6 +11,7 @@ use asolaria_server_vote_quorum::canon;
 use crate::lane_health;
 use crate::policy;
 use crate::schedule;
+use crate::stale_branch;
 use crate::Shared;
 
 fn hbp_escape(s: &str) -> String {
@@ -48,6 +49,7 @@ pub fn route(shared: &Arc<Shared>, method: &str, path: &str, _query: &str) -> (u
         ("GET", "/api/loop/schedule") => schedule_route(),
         ("GET", "/api/lane/health") => lane_health_route(),
         ("GET", "/api/policy/evaluate") => policy_route(),
+        ("GET", "/api/branch/freshness") => branch_freshness_route(),
         _ => (
             404,
             format!("COUNCILSERVE|ok=0|error=unknown_route|path={}|json=0\n", hbp_escape(path)),
@@ -409,6 +411,108 @@ fn render_policy(body: &str) -> (u16, String) {
     (200, out)
 }
 
+/// Read-only branch-freshness route (absorbed claw-code stale-branch detection). Reads a branch
+/// ledger (ndjson) from `ASOLARIA_BRANCH_LEDGER`; unset/empty -> staged. Assesses each branch's
+/// freshness (fresh/stale/diverged) + the refresh action (ready/merge_forward/rebase/block) and
+/// flags stale-noise (RED on a non-fresh branch ≠ a new regression). RECOMMENDS ONLY — it never
+/// rebases, merges, or fires.
+fn branch_freshness_route() -> (u16, String) {
+    let path = std::env::var("ASOLARIA_BRANCH_LEDGER")
+        .ok()
+        .filter(|p| !p.is_empty());
+    let Some(path) = path else {
+        return (
+            200,
+            String::from("BRANCHFRESH|ok=1|status=staged|read_only=true|source=branch_ledger_unwired|hint=set_ASOLARIA_BRANCH_LEDGER|detector=stale_branch_freshness|fire=false|json=0\n"),
+        );
+    };
+    let body = match fs::read_to_string(&path) {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                500,
+                format!(
+                    "BRANCHFRESH|ok=0|error=ledger_unreadable|kind={}|json=0\n",
+                    hbp_escape(&e.kind().to_string())
+                ),
+            )
+        }
+    };
+    render_branch_freshness(&body)
+}
+
+/// One branch row parsed from the ledger: id + its ahead/behind counts vs base + conflicting flag.
+struct BranchRow {
+    id: String,
+    ahead_by: u64,
+    behind_by: u64,
+    conflicting: bool,
+}
+
+/// Parse one ndjson branch row -> BranchRow. Requires `id`; counts default 0 (=> fresh) and
+/// conflicting defaults false. Unparseable (no id) -> None.
+fn parse_branch(line: &str) -> Option<BranchRow> {
+    let id = json_str(line, "id")?;
+    Some(BranchRow {
+        id,
+        ahead_by: json_num(line, "ahead_by").unwrap_or(0.0) as u64,
+        behind_by: json_num(line, "behind_by").unwrap_or(0.0) as u64,
+        conflicting: json_bool(line, "conflicting").unwrap_or(false),
+    })
+}
+
+/// Pure: parse the branch ledger, assess freshness + recommend the refresh action per branch,
+/// render json=0 HBP. Recommends only; never rebases/merges/fires.
+fn render_branch_freshness(body: &str) -> (u16, String) {
+    let mut rows = Vec::new();
+    let mut legacy = 0u64;
+    for line in body.lines() {
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        match parse_branch(t) {
+            Some(r) => rows.push(r),
+            None => legacy += 1,
+        }
+    }
+    let assessed: Vec<_> = rows
+        .iter()
+        .map(|r| {
+            let fresh = stale_branch::assess(r.ahead_by, r.behind_by);
+            let (action, reason) = stale_branch::recommend(fresh, r.conflicting);
+            (r, fresh, action, reason)
+        })
+        .collect();
+    let count_action =
+        |a: stale_branch::RefreshAction| assessed.iter().filter(|(_, _, act, _)| *act == a).count();
+    let stale_noise = assessed
+        .iter()
+        .filter(|(_, f, _, _)| stale_branch::is_stale_noise(*f))
+        .count();
+    let mut out = format!(
+        "BRANCHFRESH|ok=1|status=staged|read_only=true|detector=stale_branch_freshness|total={}|ready={}|merge_forward={}|rebase={}|block={}|stale_noise={}|legacy={}|fire=false|json=0\n",
+        rows.len(),
+        count_action(stale_branch::RefreshAction::Ready),
+        count_action(stale_branch::RefreshAction::MergeForward),
+        count_action(stale_branch::RefreshAction::Rebase),
+        count_action(stale_branch::RefreshAction::Block),
+        stale_noise,
+        legacy
+    );
+    for (r, fresh, action, reason) in &assessed {
+        out.push_str(&format!(
+            "BRANCH|id={}|freshness={}|action={}|stale_noise={}|reason={}|fire=false|json=0\n",
+            hbp_escape(&r.id),
+            fresh.as_str(),
+            action.as_str(),
+            stale_branch::is_stale_noise(*fresh),
+            hbp_escape(reason)
+        ));
+    }
+    (200, out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -698,5 +802,77 @@ mod policy_route_tests {
             route(&sh, "POST", "/api/policy/evaluate", "execute=1").0,
             404
         );
+    }
+}
+
+#[cfg(test)]
+mod branch_freshness_route_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn parse_branch_requires_id_counts_default_zero() {
+        let r = parse_branch(r#"{"id":"b1","ahead_by":2,"behind_by":5}"#).unwrap();
+        assert_eq!(r.id, "b1");
+        assert_eq!(r.ahead_by, 2);
+        assert_eq!(r.behind_by, 5);
+        assert!(!r.conflicting); // defaults false
+        let bare = parse_branch(r#"{"id":"b2"}"#).unwrap();
+        assert_eq!(bare.ahead_by, 0); // missing counts => fresh
+        assert_eq!(bare.behind_by, 0);
+        assert!(parse_branch(r#"{"no_id":true}"#).is_none());
+    }
+
+    #[test]
+    fn render_branch_freshness_classifies_and_flags_stale_noise() {
+        // up-to-date (ready), behind-no-own (merge_forward), diverged-clean (rebase),
+        // diverged-conflicting (block). Only the fresh one is NOT stale-noise.
+        let ledger = [
+            r#"{"id":"fresh1","ahead_by":3,"behind_by":0}"#,
+            r#"{"id":"stale1","ahead_by":0,"behind_by":7}"#,
+            r#"{"id":"div1","ahead_by":2,"behind_by":4}"#,
+            r#"{"id":"conf1","ahead_by":2,"behind_by":4,"conflicting":true}"#,
+        ]
+        .join("\n");
+        let (code, body) = render_branch_freshness(&ledger);
+        assert_eq!(code, 200);
+        assert!(body.contains("detector=stale_branch_freshness"));
+        assert!(body.contains("total=4"));
+        assert!(body.contains("ready=1"), "{body}");
+        assert!(body.contains("merge_forward=1"), "{body}");
+        assert!(body.contains("rebase=1"), "{body}");
+        assert!(body.contains("block=1"), "{body}");
+        assert!(body.contains("stale_noise=3"), "{body}"); // all non-fresh
+        assert!(body.contains("id=fresh1|freshness=fresh|action=ready|stale_noise=false"));
+        assert!(body.contains("id=stale1|freshness=stale|action=merge_forward|stale_noise=true"));
+        assert!(body.contains("id=div1|freshness=diverged|action=rebase|stale_noise=true"));
+        assert!(body.contains("id=conf1|freshness=diverged|action=block|stale_noise=true"));
+        assert!(body.contains("fire=false"));
+        assert!(!body.contains('{'));
+    }
+
+    #[test]
+    fn render_branch_freshness_empty_is_clean_zero_not_faked() {
+        let (code, body) = render_branch_freshness("");
+        assert_eq!(code, 200);
+        assert!(body.contains("total=0"));
+        assert!(body.contains("ready=0"));
+        assert!(body.contains("stale_noise=0"));
+        assert!(body.contains("fire=false"));
+    }
+
+    #[test]
+    fn branch_freshness_route_wired_read_only_no_fire() {
+        let sh = Arc::new(Shared {
+            vote_dir: PathBuf::from("."),
+        });
+        let (code, body) = route(&sh, "GET", "/api/branch/freshness", "");
+        assert_ne!(code, 404, "branch freshness route must be wired");
+        assert!(
+            body.contains("detector=stale_branch_freshness") || body.contains("ledger_unreadable")
+        );
+        assert!(body.contains("fire=false") || body.contains("ledger_unreadable"));
+        assert!(!body.contains('{'));
+        assert_eq!(route(&sh, "POST", "/api/branch/freshness", "fire=1").0, 404);
     }
 }
