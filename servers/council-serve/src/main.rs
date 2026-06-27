@@ -14,6 +14,7 @@ use std::thread;
 mod engine_drive;
 mod http;
 mod routes;
+mod schedule;
 
 const DEFAULT_BIND: &str = "127.0.0.1:5090";
 const DEFAULT_VOTE_DIR: &str = "C:/HyperBEHCS/data/vote-quorum";
