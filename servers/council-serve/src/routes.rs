@@ -444,21 +444,30 @@ fn branch_freshness_route() -> (u16, String) {
 /// One branch row parsed from the ledger: id + its ahead/behind counts vs base + conflicting flag.
 struct BranchRow {
     id: String,
-    ahead_by: u64,
-    behind_by: u64,
-    conflicting: bool,
+    ahead_by: Option<u64>,
+    behind_by: Option<u64>,
+    conflicting: Option<bool>,
 }
 
-/// Parse one ndjson branch row -> BranchRow. Requires `id`; counts default 0 (=> fresh) and
-/// conflicting defaults false. Unparseable (no id) -> None.
+/// Parse one ndjson branch row -> BranchRow. Requires `id`; missing counts/conflict are preserved as
+/// unknown so the detector fails closed instead of manufacturing `fresh -> ready`.
 fn parse_branch(line: &str) -> Option<BranchRow> {
     let id = json_str(line, "id")?;
     Some(BranchRow {
         id,
-        ahead_by: json_num(line, "ahead_by").unwrap_or(0.0) as u64,
-        behind_by: json_num(line, "behind_by").unwrap_or(0.0) as u64,
-        conflicting: json_bool(line, "conflicting").unwrap_or(false),
+        ahead_by: json_nonnegative_u64(line, "ahead_by"),
+        behind_by: json_nonnegative_u64(line, "behind_by"),
+        conflicting: json_bool(line, "conflicting"),
     })
+}
+
+fn json_nonnegative_u64(s: &str, key: &str) -> Option<u64> {
+    let n = json_num(s, key)?;
+    if n.is_finite() && n >= 0.0 && n.fract() == 0.0 && n <= u64::MAX as f64 {
+        Some(n as u64)
+    } else {
+        None
+    }
 }
 
 /// Pure: parse the branch ledger, assess freshness + recommend the refresh action per branch,
@@ -814,13 +823,23 @@ mod branch_freshness_route_tests {
     fn parse_branch_requires_id_counts_default_zero() {
         let r = parse_branch(r#"{"id":"b1","ahead_by":2,"behind_by":5}"#).unwrap();
         assert_eq!(r.id, "b1");
-        assert_eq!(r.ahead_by, 2);
-        assert_eq!(r.behind_by, 5);
-        assert!(!r.conflicting); // defaults false
+        assert_eq!(r.ahead_by, Some(2));
+        assert_eq!(r.behind_by, Some(5));
+        assert_eq!(r.conflicting, None);
         let bare = parse_branch(r#"{"id":"b2"}"#).unwrap();
-        assert_eq!(bare.ahead_by, 0); // missing counts => fresh
-        assert_eq!(bare.behind_by, 0);
+        assert_eq!(bare.ahead_by, None); // missing counts => unknown/block, never fake-fresh
+        assert_eq!(bare.behind_by, None);
         assert!(parse_branch(r#"{"no_id":true}"#).is_none());
+    }
+
+    #[test]
+    fn parse_branch_rejects_negative_or_fractional_counts() {
+        let neg = parse_branch(r#"{"id":"b1","ahead_by":-1,"behind_by":0,"conflicting":false}"#)
+            .unwrap();
+        assert_eq!(neg.ahead_by, None);
+        let frac = parse_branch(r#"{"id":"b2","ahead_by":1.5,"behind_by":0,"conflicting":false}"#)
+            .unwrap();
+        assert_eq!(frac.ahead_by, None);
     }
 
     #[test]
@@ -829,8 +848,8 @@ mod branch_freshness_route_tests {
         // diverged-conflicting (block). Only the fresh one is NOT stale-noise.
         let ledger = [
             r#"{"id":"fresh1","ahead_by":3,"behind_by":0}"#,
-            r#"{"id":"stale1","ahead_by":0,"behind_by":7}"#,
-            r#"{"id":"div1","ahead_by":2,"behind_by":4}"#,
+            r#"{"id":"stale1","ahead_by":0,"behind_by":7,"conflicting":false}"#,
+            r#"{"id":"div1","ahead_by":2,"behind_by":4,"conflicting":false}"#,
             r#"{"id":"conf1","ahead_by":2,"behind_by":4,"conflicting":true}"#,
         ]
         .join("\n");
@@ -849,6 +868,22 @@ mod branch_freshness_route_tests {
         assert!(body.contains("id=conf1|freshness=diverged|action=block|stale_noise=true"));
         assert!(body.contains("fire=false"));
         assert!(!body.contains('{'));
+    }
+
+    #[test]
+    fn render_branch_freshness_missing_fields_blocks_not_ready() {
+        let ledger = [
+            r#"{"id":"missing-counts"}"#,
+            r#"{"id":"missing-conflict","ahead_by":0,"behind_by":3}"#,
+        ]
+        .join("\n");
+        let (code, body) = render_branch_freshness(&ledger);
+        assert_eq!(code, 200);
+        assert!(body.contains("total=2"));
+        assert!(body.contains("ready=0"), "{body}");
+        assert!(body.contains("block=2"), "{body}");
+        assert!(body.contains("id=missing-counts|freshness=unknown|action=block"));
+        assert!(body.contains("id=missing-conflict|freshness=stale|action=block"));
     }
 
     #[test]
