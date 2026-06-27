@@ -17,6 +17,7 @@ mod lane_event;
 mod lane_health;
 mod mcp_health;
 mod policy;
+mod recovery;
 mod routes;
 mod schedule;
 mod stale_branch;

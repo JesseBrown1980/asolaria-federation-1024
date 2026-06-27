@@ -12,6 +12,7 @@ use crate::lane_event;
 use crate::lane_health;
 use crate::mcp_health;
 use crate::policy;
+use crate::recovery;
 use crate::schedule;
 use crate::stale_branch;
 use crate::Shared;
@@ -56,6 +57,7 @@ pub fn route(shared: &Arc<Shared>, method: &str, path: &str, _query: &str) -> (u
         ("GET", "/api/branch/freshness") => branch_freshness_route(),
         ("GET", "/api/mcp/health") => mcp_health_route(),
         ("GET", "/api/lane/events") => lane_events_route(),
+        ("GET", "/api/lane/recovery") => recovery_route(),
         _ => (
             404,
             format!("COUNCILSERVE|ok=0|error=unknown_route|path={}|json=0\n", hbp_escape(path)),
@@ -785,6 +787,112 @@ fn render_lane_events(body: &str) -> (u16, String) {
     (200, out)
 }
 
+/// Read-only recovery-recipe route (absorbed claw-code recovery recipes + bounded-retry ledger).
+/// Reads a recovery ledger (ndjson) from `ASOLARIA_RECOVERY_LEDGER`; unset/empty -> staged (never
+/// fake-clean), unreadable -> 500. Decides each lane's recovery action (recipe within retry budget,
+/// else escalate). DECIDES ONLY — never restarts/reconnects/re-sends/fires.
+fn recovery_route() -> (u16, String) {
+    let path = std::env::var("ASOLARIA_RECOVERY_LEDGER")
+        .ok()
+        .filter(|p| !p.is_empty());
+    let Some(path) = path else {
+        return (
+            200,
+            String::from("RECOVERY|ok=1|status=staged|read_only=true|source=recovery_ledger_unwired|hint=set_ASOLARIA_RECOVERY_LEDGER|engine=recovery_recipes|execute=false|json=0\n"),
+        );
+    };
+    let body = match fs::read_to_string(&path) {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                500,
+                format!(
+                    "RECOVERY|ok=0|error=ledger_unreadable|kind={}|json=0\n",
+                    hbp_escape(&e.kind().to_string())
+                ),
+            )
+        }
+    };
+    render_recovery(
+        &body,
+        env_usize("ASOLARIA_RECOVERY_MAX_ATTEMPTS", 3).min(u32::MAX as usize) as u32,
+    )
+}
+
+/// One recovery-ledger row: a lane, its classified failure, and how many attempts already made.
+struct RecoveryRow {
+    lane: String,
+    failure: lane_health::StartupFailure,
+    attempts: u32,
+}
+
+/// Parse one ndjson recovery row. Requires `lane` AND a recognized `failure` (an unknown failure
+/// string is unparseable -> legacy, never silently treated as recoverable). `attempts` absent -> 0.
+fn parse_recovery(line: &str) -> Option<RecoveryRow> {
+    let lane = json_str(line, "lane")?;
+    let failure = recovery::parse_failure(&json_str(line, "failure")?)?;
+    // attempts: genuinely absent -> 0 (fresh). But a PRESENT-but-unparseable value (> u64::MAX /
+    // string-quoted / negative) fails CLOSED -> u32::MAX so the lane escalates, never collapsing to
+    // 0=fresh-and-recoverable (same guard as parse_event's host_handle8; adversarial-review fix).
+    let attempts = match json_u64(line, "attempts") {
+        Some(n) => n.min(u32::MAX as u64) as u32,
+        None if line.contains("\"attempts\"") => u32::MAX,
+        None => 0,
+    };
+    Some(RecoveryRow {
+        lane,
+        failure,
+        attempts,
+    })
+}
+
+/// Pure: parse the recovery ledger, decide each lane's recovery action, render json=0 HBP. Decides
+/// only; never executes. A lane past its retry budget (and any `unknown` failure) reads `escalate`.
+fn render_recovery(body: &str, max_attempts: u32) -> (u16, String) {
+    let mut rows = Vec::new();
+    let mut legacy = 0u64;
+    for line in body.lines() {
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        match parse_recovery(t) {
+            Some(r) => rows.push(r),
+            None => legacy += 1,
+        }
+    }
+    let decided: Vec<_> = rows
+        .iter()
+        .map(|r| (r, recovery::recommend(r.failure, r.attempts, max_attempts)))
+        .collect();
+    let escalate = decided
+        .iter()
+        .filter(|(_, (a, _))| a.is_escalation())
+        .count();
+    let recoverable = decided.len() - escalate;
+    let exhausted = rows.iter().filter(|r| r.attempts >= max_attempts).count();
+    let mut out = format!(
+        "RECOVERY|ok=1|status=ok|read_only=true|engine=recovery_recipes|total={}|recoverable={}|escalate={}|exhausted={}|max_attempts={}|legacy={}|execute=false|json=0\n",
+        rows.len(),
+        recoverable,
+        escalate,
+        exhausted,
+        max_attempts,
+        legacy
+    );
+    for (r, (action, reason)) in &decided {
+        out.push_str(&format!(
+            "RECLANE|lane={}|failure={}|attempts={}|action={}|reason={}|execute=false|json=0\n",
+            hbp_escape(&r.lane),
+            r.failure.as_str(),
+            r.attempts,
+            action.as_str(),
+            hbp_escape(reason)
+        ));
+    }
+    (200, out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1426,5 +1534,101 @@ mod lane_events_route_tests {
         assert!(body.contains("fire=false") || body.contains("ledger_unreadable"));
         assert!(!body.contains('{'));
         assert_eq!(route(&sh, "POST", "/api/lane/events", "fire=1").0, 404);
+    }
+}
+
+#[cfg(test)]
+mod recovery_route_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn parse_recovery_requires_lane_and_known_failure() {
+        let r = parse_recovery(r#"{"lane":"L1","failure":"worker_crashed","attempts":2}"#).unwrap();
+        assert_eq!(r.lane, "L1");
+        assert_eq!(r.failure, lane_health::StartupFailure::WorkerCrashed);
+        assert_eq!(r.attempts, 2);
+        assert!(parse_recovery(r#"{"failure":"worker_crashed"}"#).is_none()); // no lane
+        assert!(parse_recovery(r#"{"lane":"x","failure":"bogus"}"#).is_none()); // unknown failure -> legacy
+                                                                                // attempts absent -> 0
+        assert_eq!(
+            parse_recovery(r#"{"lane":"x","failure":"transport_dead"}"#)
+                .unwrap()
+                .attempts,
+            0
+        );
+    }
+
+    #[test]
+    fn render_recovery_recipes_and_escalates_on_exhaustion() {
+        // within budget -> recipe action; over budget -> escalate; unknown -> escalate.
+        let ledger = [
+            r#"{"lane":"crash1","failure":"worker_crashed","attempts":0}"#,
+            r#"{"lane":"trust1","failure":"trust_required","attempts":1}"#,
+            r#"{"lane":"dead1","failure":"transport_dead","attempts":5}"#, // exhausted -> escalate
+            r#"{"lane":"huh1","failure":"unknown","attempts":0}"#,         // unknown -> escalate
+        ]
+        .join("\n");
+        let (code, body) = render_recovery(&ledger, 3);
+        assert_eq!(code, 200);
+        assert!(body.contains("engine=recovery_recipes"));
+        assert!(body.contains("total=4"));
+        assert!(body.contains("recoverable=2"), "{body}"); // crash1, trust1
+        assert!(body.contains("escalate=2"), "{body}"); // dead1 (exhausted), huh1 (unknown)
+        assert!(body.contains("exhausted=1"), "{body}"); // dead1 attempts>=3
+        assert!(
+            body.contains("lane=crash1|failure=worker_crashed|attempts=0|action=restart_worker")
+        );
+        assert!(body.contains("lane=trust1|failure=trust_required|attempts=1|action=reissue_trust"));
+        assert!(body.contains("lane=dead1|failure=transport_dead|attempts=5|action=escalate"));
+        assert!(body.contains("lane=huh1|failure=unknown|attempts=0|action=escalate"));
+        assert!(body.contains("execute=false"));
+        assert!(!body.contains('{'));
+    }
+
+    #[test]
+    fn render_recovery_present_but_corrupt_attempts_escalates() {
+        // ADVERSARIAL-REVIEW FIX: a present-but-unparseable attempts (> u64::MAX / string-quoted /
+        // negative) must fail closed -> escalate/exhausted, never collapse to 0=fresh-recoverable.
+        let ledger = [
+            r#"{"lane":"a","failure":"worker_crashed","attempts":99999999999999999999}"#,
+            r#"{"lane":"b","failure":"transport_dead","attempts":"7"}"#,
+        ]
+        .join("\n");
+        let (_, body) = render_recovery(&ledger, 3);
+        assert!(body.contains("escalate=2"), "{body}");
+        assert!(body.contains("exhausted=2"), "{body}");
+        assert!(body.contains("recoverable=0"), "{body}");
+        assert!(body.contains("lane=a|failure=worker_crashed|attempts=4294967295|action=escalate"));
+    }
+
+    #[test]
+    fn render_recovery_empty_is_clean_zero() {
+        let (code, body) = render_recovery("", 3);
+        assert_eq!(code, 200);
+        assert!(body.contains("total=0"));
+        assert!(body.contains("recoverable=0"));
+        assert!(body.contains("escalate=0"));
+    }
+
+    #[test]
+    fn render_recovery_legacy_row_counted_not_dropped() {
+        let ledger = "{\"lane\":\"x\",\"failure\":\"worker_crashed\"}\n{\"lane\":\"y\",\"failure\":\"bogus\"}\n";
+        let (_, body) = render_recovery(ledger, 3);
+        assert!(body.contains("total=1"));
+        assert!(body.contains("legacy=1")); // bogus failure -> legacy, not silently recoverable
+    }
+
+    #[test]
+    fn recovery_route_wired_read_only_no_execute() {
+        let sh = Arc::new(Shared {
+            vote_dir: PathBuf::from("."),
+        });
+        let (code, body) = route(&sh, "GET", "/api/lane/recovery", "");
+        assert_ne!(code, 404, "recovery route must be wired");
+        assert!(body.contains("engine=recovery_recipes") || body.contains("ledger_unreadable"));
+        assert!(body.contains("execute=false") || body.contains("ledger_unreadable"));
+        assert!(!body.contains('{'));
+        assert_eq!(route(&sh, "POST", "/api/lane/recovery", "execute=1").0, 404);
     }
 }
