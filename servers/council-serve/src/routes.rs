@@ -9,6 +9,7 @@ use std::sync::Arc;
 use asolaria_server_vote_quorum::canon;
 
 use crate::lane_health;
+use crate::mcp_health;
 use crate::policy;
 use crate::schedule;
 use crate::stale_branch;
@@ -17,7 +18,9 @@ use crate::Shared;
 fn hbp_escape(s: &str) -> String {
     s.chars()
         .map(|c| match c {
-            '|' | '\r' | '\n' | '\t' => '_',
+            // '|' CR LF tab break the pipe-delimited line; '{' '}' would emit a brace into json=0
+            // output (the no-brace invariant) — neutralize all of them.
+            '|' | '\r' | '\n' | '\t' | '{' | '}' => '_',
             _ => c,
         })
         .collect()
@@ -50,6 +53,7 @@ pub fn route(shared: &Arc<Shared>, method: &str, path: &str, _query: &str) -> (u
         ("GET", "/api/lane/health") => lane_health_route(),
         ("GET", "/api/policy/evaluate") => policy_route(),
         ("GET", "/api/branch/freshness") => branch_freshness_route(),
+        ("GET", "/api/mcp/health") => mcp_health_route(),
         _ => (
             404,
             format!("COUNCILSERVE|ok=0|error=unknown_route|path={}|json=0\n", hbp_escape(path)),
@@ -522,6 +526,127 @@ fn render_branch_freshness(body: &str) -> (u16, String) {
     (200, out)
 }
 
+/// Read-only MCP/fabric degraded-mode route (absorbed claw-code MCP degraded-mode). Reads a lane
+/// evidence ledger (ndjson) from `ASOLARIA_MCP_LEDGER`; unset/empty -> staged (never fake-clean),
+/// unreadable -> 500. Classifies each lane healthy/degraded/down/unknown + names why, and upholds the
+/// claims-gate invariant (a fallback/stale lane is NEVER live). CLASSIFIES ONLY — never probes/fires.
+fn mcp_health_route() -> (u16, String) {
+    let path = std::env::var("ASOLARIA_MCP_LEDGER")
+        .ok()
+        .filter(|p| !p.is_empty());
+    let Some(path) = path else {
+        return (
+            200,
+            String::from("MCPHEALTH|ok=1|status=staged|read_only=true|source=mcp_ledger_unwired|hint=set_ASOLARIA_MCP_LEDGER|detector=mcp_degraded_mode|fire=false|json=0\n"),
+        );
+    };
+    let body = match fs::read_to_string(&path) {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                500,
+                format!(
+                    "MCPHEALTH|ok=0|error=ledger_unreadable|kind={}|json=0\n",
+                    hbp_escape(&e.kind().to_string())
+                ),
+            )
+        }
+    };
+    render_mcp_health(
+        &body,
+        env_usize("ASOLARIA_MCP_STALE_MS", 30_000) as u64,
+        env_usize("ASOLARIA_MCP_TIMEOUT_MS", 10_000) as u64,
+    )
+}
+
+/// Parse one ndjson lane-evidence row -> mcp_health::Evidence. Requires `lane`; everything else
+/// defaults to the PESSIMISTIC side (probed/transport_ok/responded/response_present=false) so a bare
+/// row can never reach Healthy. `age_ms` absent OR negative (future-dated) -> None. `raw` = the whole
+/// line, so a buried HBPFALLBACK / *_fallback is caught even if the producer omitted the bool.
+fn parse_mcp(line: &str) -> Option<mcp_health::Evidence> {
+    let lane = json_str(line, "lane")?;
+    let capability = json_str(line, "capability").unwrap_or_else(|| lane.clone());
+    let age_ms = match json_num(line, "age_ms") {
+        Some(n) if n >= 0.0 => Some(n as u64),
+        _ => None, // absent or future-dated/negative -> unprovable freshness
+    };
+    Some(mcp_health::Evidence {
+        lane,
+        capability,
+        probed: json_bool(line, "probed").unwrap_or(false),
+        transport_ok: json_bool(line, "transport_ok").unwrap_or(false),
+        responded: json_bool(line, "responded").unwrap_or(false),
+        response_present: json_bool(line, "response_present").unwrap_or(false),
+        server_error: json_str(line, "server_error").unwrap_or_default(),
+        fallback_marker: json_bool(line, "fallback_marker").unwrap_or(false),
+        fallback_key: json_bool(line, "fallback_key").unwrap_or(false),
+        tainted_field: json_str(line, "tainted_field").unwrap_or_else(|| "-".to_string()),
+        age_ms,
+        elapsed_ms: json_num(line, "elapsed_ms").unwrap_or(0.0).max(0.0) as u64,
+        raw: line.to_string(),
+    })
+}
+
+/// Pure: parse the MCP ledger, classify each lane, render json=0 HBP. Classifies only; never fires.
+/// `live=` is printed true IFF health=healthy — the explicit anti-fake-clean flag.
+fn render_mcp_health(body: &str, stale_after_ms: u64, timeout_ms: u64) -> (u16, String) {
+    let mut lanes = Vec::new();
+    let mut legacy = 0u64;
+    for line in body.lines() {
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        match parse_mcp(t) {
+            Some(e) => lanes.push(e),
+            None => legacy += 1,
+        }
+    }
+    let diags: Vec<_> = lanes
+        .iter()
+        .map(|e| (e, mcp_health::classify(e, stale_after_ms, timeout_ms)))
+        .collect();
+    let count = |h: mcp_health::LaneHealth| diags.iter().filter(|(_, d)| d.health == h).count();
+    let healthy = count(mcp_health::LaneHealth::Healthy);
+    let degraded = count(mcp_health::LaneHealth::Degraded);
+    let down = count(mcp_health::LaneHealth::Down);
+    let unknown = count(mcp_health::LaneHealth::Unknown);
+    let fallback_tainted = diags
+        .iter()
+        .filter(|(_, d)| d.reason.is_fallback_taint())
+        .count();
+    let stale = diags.iter().filter(|(_, d)| d.reason.is_stale()).count();
+    let worst = mcp_health::worst(&diags.iter().map(|(_, d)| d.clone()).collect::<Vec<_>>());
+    let mut out = format!(
+        "MCPHEALTH|ok=1|status=ok|read_only=true|detector=mcp_degraded_mode|total={}|healthy={}|degraded={}|down={}|unknown={}|not_live={}|fallback_tainted={}|stale={}|legacy={}|worst={}|stale_ms={}|timeout_ms={}|fire=false|json=0\n",
+        lanes.len(),
+        healthy,
+        degraded,
+        down,
+        unknown,
+        degraded + down + unknown,
+        fallback_tainted,
+        stale,
+        legacy,
+        worst.as_str(),
+        stale_after_ms,
+        timeout_ms
+    );
+    for (e, d) in &diags {
+        out.push_str(&format!(
+            "MCPLANE|lane={}|capability={}|health={}|reason={}|tainted_field={}|age_ms={}|live={}|fire=false|json=0\n",
+            hbp_escape(&e.lane),
+            hbp_escape(&e.capability),
+            d.health.as_str(),
+            d.reason.as_str(),
+            hbp_escape(&d.tainted_field),
+            e.age_ms.map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string()),
+            mcp_health::is_live(d)
+        ));
+    }
+    (200, out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -909,5 +1034,103 @@ mod branch_freshness_route_tests {
         assert!(body.contains("fire=false") || body.contains("ledger_unreadable"));
         assert!(!body.contains('{'));
         assert_eq!(route(&sh, "POST", "/api/branch/freshness", "fire=1").0, 404);
+    }
+}
+
+#[cfg(test)]
+mod mcp_health_route_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn parse_mcp_requires_lane_defaults_pessimistic() {
+        let e = parse_mcp(r#"{"lane":"asolaria-fabric","probed":true}"#).unwrap();
+        assert_eq!(e.lane, "asolaria-fabric");
+        assert_eq!(e.capability, "asolaria-fabric"); // defaults to lane
+        assert!(e.probed);
+        assert!(!e.transport_ok); // pessimistic default
+        assert!(!e.responded);
+        assert!(e.age_ms.is_none()); // absent -> None
+        assert!(parse_mcp(r#"{"no_lane":true}"#).is_none());
+    }
+
+    #[test]
+    fn parse_mcp_future_dated_age_is_none() {
+        let e = parse_mcp(r#"{"lane":"x","age_ms":-5}"#).unwrap();
+        assert!(e.age_ms.is_none()); // negative/future-dated -> unprovable
+        let e2 = parse_mcp(r#"{"lane":"x","age_ms":1200}"#).unwrap();
+        assert_eq!(e2.age_ms, Some(1200));
+    }
+
+    #[test]
+    fn render_mcp_health_classifies_and_upholds_anti_fake_clean() {
+        // 1 healthy, 1 fresh-fallback (degraded, NOT live), 1 stale (degraded), 1 transport-down
+        // (down), 1 not-probed (unknown). The fallback lane must read live=false despite being fresh.
+        let ledger = [
+            r#"{"lane":"fab","capability":"council_query","probed":true,"transport_ok":true,"responded":true,"response_present":true,"age_ms":1000}"#,
+            r#"{"lane":"sup","capability":"supervisors","probed":true,"transport_ok":true,"responded":true,"response_present":true,"age_ms":5,"fallback_marker":true}"#,
+            r#"{"lane":"canon","capability":"canon_index","probed":true,"transport_ok":true,"responded":true,"response_present":true,"age_ms":999999}"#,
+            r#"{"lane":"bus","capability":"bus_4944","probed":true,"transport_ok":false,"responded":false}"#,
+            r#"{"lane":"recall","capability":"recall_search"}"#,
+        ]
+        .join("\n");
+        let (code, body) = render_mcp_health(&ledger, 30_000, 10_000);
+        assert_eq!(code, 200);
+        assert!(body.contains("detector=mcp_degraded_mode"));
+        assert!(body.contains("total=5"));
+        assert!(body.contains("healthy=1"), "{body}");
+        assert!(body.contains("degraded=2"), "{body}");
+        assert!(body.contains("down=1"), "{body}");
+        assert!(body.contains("unknown=1"), "{body}");
+        assert!(body.contains("not_live=4"), "{body}");
+        assert!(body.contains("fallback_tainted=1"), "{body}");
+        assert!(body.contains("worst=down"), "{body}");
+        // the cardinal property: fresh fallback lane is NOT live
+        assert!(body.contains("lane=sup|capability=supervisors|health=degraded|reason=fallback_envelope|tainted_field=-|age_ms=5|live=false"));
+        assert!(body.contains("lane=fab|capability=council_query|health=healthy|reason=none|tainted_field=-|age_ms=1000|live=true"));
+        assert!(body.contains("fire=false"));
+        assert!(!body.contains('{'));
+    }
+
+    #[test]
+    fn render_mcp_health_brace_in_field_is_escaped_no_brace_leaks() {
+        // ADVERSARIAL-REVIEW FIX: a brace-bearing lane/capability must not emit a literal '{'/'}'.
+        let ledger = r#"{"lane":"x{y}z","capability":"c{d}","probed":true,"transport_ok":true,"responded":true,"response_present":true,"age_ms":100}"#;
+        let (code, body) = render_mcp_health(ledger, 30_000, 10_000);
+        assert_eq!(code, 200);
+        assert!(!body.contains('{'), "{body}");
+        assert!(!body.contains('}'), "{body}");
+        assert!(body.contains("lane=x_y_z")); // braces neutralized to '_'
+    }
+
+    #[test]
+    fn render_mcp_health_empty_is_clean_zero_not_faked() {
+        let (code, body) = render_mcp_health("", 30_000, 10_000);
+        assert_eq!(code, 200);
+        assert!(body.contains("total=0"));
+        assert!(body.contains("healthy=0"));
+        assert!(body.contains("not_live=0"));
+        assert!(body.contains("worst=healthy"));
+    }
+
+    #[test]
+    fn render_mcp_health_legacy_row_counted_not_dropped() {
+        let ledger = "{\"lane\":\"x\",\"probed\":true,\"responded\":true,\"response_present\":true,\"transport_ok\":true,\"age_ms\":1}\n{\"no_lane\":1}\n";
+        let (_, body) = render_mcp_health(ledger, 30_000, 10_000);
+        assert!(body.contains("total=1"));
+        assert!(body.contains("legacy=1"));
+    }
+
+    #[test]
+    fn mcp_health_route_wired_read_only_no_fire() {
+        let sh = Arc::new(Shared {
+            vote_dir: PathBuf::from("."),
+        });
+        let (code, body) = route(&sh, "GET", "/api/mcp/health", "");
+        assert_ne!(code, 404, "mcp health route must be wired");
+        assert!(body.contains("detector=mcp_degraded_mode") || body.contains("ledger_unreadable"));
+        assert!(body.contains("fire=false") || body.contains("ledger_unreadable"));
+        assert!(!body.contains('{'));
+        assert_eq!(route(&sh, "POST", "/api/mcp/health", "fire=1").0, 404);
     }
 }
