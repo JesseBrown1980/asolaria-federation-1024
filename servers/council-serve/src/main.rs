@@ -17,6 +17,7 @@ mod lane_health;
 mod policy;
 mod routes;
 mod schedule;
+mod stale_branch;
 
 const DEFAULT_BIND: &str = "127.0.0.1:5090";
 const DEFAULT_VOTE_DIR: &str = "C:/HyperBEHCS/data/vote-quorum";
