@@ -9,6 +9,7 @@ use std::sync::Arc;
 use asolaria_server_vote_quorum::canon;
 
 use crate::lane_health;
+use crate::policy;
 use crate::schedule;
 use crate::Shared;
 
@@ -46,6 +47,7 @@ pub fn route(shared: &Arc<Shared>, method: &str, path: &str, _query: &str) -> (u
         ),
         ("GET", "/api/loop/schedule") => schedule_route(),
         ("GET", "/api/lane/health") => lane_health_route(),
+        ("GET", "/api/policy/evaluate") => policy_route(),
         _ => (
             404,
             format!("COUNCILSERVE|ok=0|error=unknown_route|path={}|json=0\n", hbp_escape(path)),
@@ -323,6 +325,90 @@ fn render_lane_health(body: &str, acceptance_timeout_ms: u64) -> (u16, String) {
     (200, out)
 }
 
+/// Read-only policy-engine route (absorbed claw-code policy engine = the executable PR-triage). Reads
+/// a PR-context ledger (ndjson) from `ASOLARIA_PR_LEDGER`; unset/empty -> staged. Evaluates each PR's
+/// disposition (merge/close/rebase/hold). DECIDES ONLY — performs no merge/close/rebase/fire.
+fn policy_route() -> (u16, String) {
+    let path = std::env::var("ASOLARIA_PR_LEDGER")
+        .ok()
+        .filter(|p| !p.is_empty());
+    let Some(path) = path else {
+        return (
+            200,
+            String::from("POLICY|ok=1|status=staged|read_only=true|source=pr_ledger_unwired|hint=set_ASOLARIA_PR_LEDGER|engine=pr_triage_policy|execute=false|json=0\n"),
+        );
+    };
+    let body = match fs::read_to_string(&path) {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                500,
+                format!(
+                    "POLICY|ok=0|error=ledger_unreadable|kind={}|json=0\n",
+                    hbp_escape(&e.kind().to_string())
+                ),
+            )
+        }
+    };
+    render_policy(&body)
+}
+
+/// Parse one ndjson PR-context row -> PrContext. Requires `id`; flags default safe (ci_ok=true so a
+/// missing CI gate doesn't block; everything else false -> bare rows fall to HOLD). Unparseable -> None.
+fn parse_pr_context(line: &str) -> Option<policy::PrContext> {
+    let id = json_str(line, "id")?;
+    Some(policy::PrContext {
+        id,
+        ci_ok: json_bool(line, "ci_ok").unwrap_or(true),
+        clean: json_bool(line, "clean").unwrap_or(false),
+        dirty: json_bool(line, "dirty").unwrap_or(false),
+        draft: json_bool(line, "draft").unwrap_or(false),
+        superseded: json_bool(line, "superseded").unwrap_or(false),
+        additive: json_bool(line, "additive").unwrap_or(false),
+        sensitive: json_bool(line, "sensitive").unwrap_or(false),
+        author_forbids: json_bool(line, "author_forbids").unwrap_or(false),
+    })
+}
+
+/// Pure: parse the PR ledger, evaluate each disposition, render json=0 HBP. Decides only; never executes.
+fn render_policy(body: &str) -> (u16, String) {
+    let mut prs = Vec::new();
+    let mut legacy = 0u64;
+    for line in body.lines() {
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        match parse_pr_context(t) {
+            Some(p) => prs.push(p),
+            None => legacy += 1,
+        }
+    }
+    let decided: Vec<_> = prs
+        .iter()
+        .map(|p| (p.id.clone(), policy::evaluate(p)))
+        .collect();
+    let count = |a: policy::PolicyAction| decided.iter().filter(|(_, (act, _))| *act == a).count();
+    let mut out = format!(
+        "POLICY|ok=1|status=staged|read_only=true|engine=pr_triage_policy|total={}|merge={}|close={}|rebase={}|hold={}|legacy={}|execute=false|json=0\n",
+        prs.len(),
+        count(policy::PolicyAction::Merge),
+        count(policy::PolicyAction::Close),
+        count(policy::PolicyAction::Rebase),
+        count(policy::PolicyAction::Hold),
+        legacy
+    );
+    for (id, (action, reason)) in &decided {
+        out.push_str(&format!(
+            "PRPOLICY|id={}|action={}|reason={}|execute=false|json=0\n",
+            hbp_escape(id),
+            action.as_str(),
+            hbp_escape(reason)
+        ));
+    }
+    (200, out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -553,5 +639,64 @@ mod lane_health_route_tests {
         assert!(body.contains("fire=false") || body.contains("ledger_unreadable"));
         assert!(!body.contains('{'));
         assert_eq!(route(&sh, "POST", "/api/lane/health", "fire=1").0, 404);
+    }
+}
+
+#[cfg(test)]
+mod policy_route_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn parse_pr_context_requires_id_ci_defaults_true() {
+        let p = parse_pr_context(r#"{"id":"PR1","clean":true,"additive":true}"#).unwrap();
+        assert_eq!(p.id, "PR1");
+        assert!(p.ci_ok); // defaults true (no-CI repos don't block)
+        assert!(p.clean && p.additive);
+        assert!(parse_pr_context(r#"{"no_id":1}"#).is_none());
+    }
+
+    #[test]
+    fn render_policy_reproduces_the_hand_triage() {
+        // mirrors the real backlog: a clean additive findings PR (merge), a superseded (close),
+        // a DIRTY federation PR (rebase), a sensitive root PR (hold), an author-forbids PR (hold).
+        let ledger = [
+            r#"{"id":"findings","clean":true,"additive":true}"#,
+            r#"{"id":"old12","superseded":true,"clean":true,"additive":true}"#,
+            r#"{"id":"fed7","dirty":true,"additive":true}"#,
+            r#"{"id":"root4","sensitive":true,"clean":true,"additive":true}"#,
+            r#"{"id":"alg4","author_forbids":true,"clean":true,"additive":true}"#,
+        ]
+        .join("\n");
+        let (code, body) = render_policy(&ledger);
+        assert_eq!(code, 200);
+        assert!(body.contains("engine=pr_triage_policy"));
+        assert!(body.contains("total=5"));
+        assert!(body.contains("merge=1"), "{body}");
+        assert!(body.contains("close=1"), "{body}");
+        assert!(body.contains("rebase=1"), "{body}");
+        assert!(body.contains("hold=2"), "{body}");
+        assert!(body.contains("id=findings|action=merge"));
+        assert!(body.contains("id=old12|action=close"));
+        assert!(body.contains("id=fed7|action=rebase"));
+        assert!(body.contains("id=root4|action=hold"));
+        assert!(body.contains("execute=false"));
+        assert!(!body.contains('{'));
+    }
+
+    #[test]
+    fn policy_route_wired_read_only_no_execute() {
+        let sh = Arc::new(Shared {
+            vote_dir: PathBuf::from("."),
+        });
+        let (code, body) = route(&sh, "GET", "/api/policy/evaluate", "");
+        assert_ne!(code, 404, "policy route must be wired");
+        assert!(body.contains("engine=pr_triage_policy") || body.contains("ledger_unreadable"));
+        assert!(body.contains("execute=false") || body.contains("ledger_unreadable"));
+        assert!(!body.contains('{'));
+        assert_eq!(
+            route(&sh, "POST", "/api/policy/evaluate", "execute=1").0,
+            404
+        );
     }
 }
