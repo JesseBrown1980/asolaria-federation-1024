@@ -2,7 +2,8 @@
 //! json=0 HBP default (`?format=json` cold opt-in). Increment-1 read-only port of the Node
 //! super-asolaria-os-dashboard (43 routes): this increment serves `/health` + `/api/canon-index`
 //! at byte/data parity, in the Host-8 json=0 frame. STAGED shadow — no writes, no fire, no cutover;
-//! the live Node :4949 is untouched (run this on a shadow bind for parity until operator cutover).
+//! the live Node :4949 is untouched. The default bind is a LOOPBACK SHADOW port so a bare launch can
+//! never collide with / replace the live Node; cutover is an explicit `ASOLARIA_DASH_BIND=0.0.0.0:4949`.
 
 use std::env;
 use std::net::TcpListener;
@@ -14,7 +15,10 @@ use std::thread;
 mod http;
 mod routes;
 
-const DEFAULT_BIND: &str = "0.0.0.0:4949";
+// Staged/no-cutover safety (liris attack-verify, PR #12): default to a LOOPBACK SHADOW port — a bare
+// launch must never bind the live all-interfaces dashboard port. Cutover = explicit operator-gated
+// `ASOLARIA_DASH_BIND=0.0.0.0:4949`.
+const DEFAULT_BIND: &str = "127.0.0.1:14949";
 const DEFAULT_MEMORY_DIR: &str = "C:/Users/acer/.claude/projects/C--/memory";
 const MAX_CONN: usize = 128;
 
@@ -48,4 +52,25 @@ fn main() -> std::io::Result<()> {
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DEFAULT_BIND;
+
+    /// Staged/no-cutover invariant (liris attack-verify, PR #12): the default bind must be a
+    /// loopback shadow port — never the live all-interfaces dashboard port. Cutover requires an
+    /// explicit ASOLARIA_DASH_BIND override.
+    #[test]
+    fn default_bind_is_shadow_safe_not_live_4949() {
+        assert_ne!(DEFAULT_BIND, "0.0.0.0:4949");
+        assert!(
+            DEFAULT_BIND.starts_with("127.0.0.1:"),
+            "default bind must be loopback shadow, got: {DEFAULT_BIND}"
+        );
+        assert!(
+            !DEFAULT_BIND.ends_with(":4949"),
+            "default must not be the live port"
+        );
+    }
 }
