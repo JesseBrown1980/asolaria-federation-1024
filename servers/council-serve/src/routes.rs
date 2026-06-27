@@ -207,19 +207,32 @@ fn parse_proposal(line: &str) -> Option<schedule::Proposal> {
     })
 }
 
-fn json_str(s: &str, key: &str) -> Option<String> {
+/// Locate a JSON key at an OBJECT-KEY position: the first `"key"` occurrence immediately followed
+/// (after optional whitespace) by `:`. Returns the value slice (everything after the colon, leading
+/// whitespace not trimmed). This rejects a key NAME that appears inside a string VALUE — e.g. for key
+/// `lane`, the row `{"note":"lane","lane":"real"}` skips the value occurrence and finds the real key.
+/// (Hardening: the previous helpers used a bare substring find and could be fooled by such values.)
+fn find_key<'a>(s: &'a str, key: &str) -> Option<&'a str> {
     let pat = format!("\"{key}\"");
-    let i = s.find(&pat)? + pat.len();
-    let after = s[i..].trim_start_matches([' ', ':']);
-    let after = after.strip_prefix('"')?;
+    let mut rest = s;
+    loop {
+        let rel = rest.find(&pat)?;
+        let after = &rest[rel + pat.len()..];
+        if let Some(value) = after.trim_start().strip_prefix(':') {
+            return Some(value);
+        }
+        rest = after; // this occurrence wasn't a key position; keep searching past it
+    }
+}
+
+fn json_str(s: &str, key: &str) -> Option<String> {
+    let after = find_key(s, key)?.trim_start().strip_prefix('"')?;
     let end = after.find('"')?;
     Some(after[..end].to_string())
 }
 
 fn json_num(s: &str, key: &str) -> Option<f64> {
-    let pat = format!("\"{key}\"");
-    let i = s.find(&pat)? + pat.len();
-    let after = s[i..].trim_start_matches([' ', ':']);
+    let after = find_key(s, key)?.trim_start();
     let end = after
         .find(|c: char| {
             !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E')
@@ -229,9 +242,7 @@ fn json_num(s: &str, key: &str) -> Option<f64> {
 }
 
 fn json_bool(s: &str, key: &str) -> Option<bool> {
-    let pat = format!("\"{key}\"");
-    let i = s.find(&pat)? + pat.len();
-    let after = s[i..].trim_start_matches([' ', ':']);
+    let after = find_key(s, key)?.trim_start();
     if after.starts_with("true") {
         Some(true)
     } else if after.starts_with("false") {
@@ -683,9 +694,7 @@ fn lane_events_route() -> (u16, String) {
 /// Precise u64 parse that reads the digit run directly (NOT via the f64 `json_num`, which loses
 /// precision above 2^53 — the full-range FNV `host_handle8` needs exact bits). Absent/non-numeric -> None.
 fn json_u64(s: &str, key: &str) -> Option<u64> {
-    let pat = format!("\"{key}\"");
-    let i = s.find(&pat)? + pat.len();
-    let after = s[i..].trim_start_matches([' ', ':']);
+    let after = find_key(s, key)?.trim_start();
     let end = after
         .find(|c: char| !c.is_ascii_digit())
         .unwrap_or(after.len());
@@ -918,6 +927,33 @@ mod tests {
         let (code, body) = route(&sh, "GET", "/nope", "");
         assert_eq!(code, 404);
         assert!(body.ends_with("json=0\n"));
+    }
+
+    #[test]
+    fn json_key_matcher_ignores_key_name_inside_a_value() {
+        // HARDENING: a key NAME appearing inside a string VALUE must not be mis-parsed as the key —
+        // find_key requires the match to sit at an object-key position (followed by ':').
+        assert_eq!(
+            json_u64(
+                r#"{"hash":"host_handle8","host_handle8":12345}"#,
+                "host_handle8"
+            ),
+            Some(12345)
+        );
+        assert_eq!(
+            json_str(r#"{"note":"lane","lane":"real"}"#, "lane").as_deref(),
+            Some("real")
+        );
+        assert_eq!(
+            json_bool(r#"{"x":"probed","probed":true}"#, "probed"),
+            Some(true)
+        );
+        assert_eq!(
+            json_num(r#"{"label":"score","score":0.5}"#, "score"),
+            Some(0.5)
+        );
+        // a key that only ever appears as a value (never a real key) -> None, not the value text
+        assert_eq!(json_u64(r#"{"hash":"seq"}"#, "seq"), None);
     }
 
     #[test]
