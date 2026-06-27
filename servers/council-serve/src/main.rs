@@ -13,6 +13,7 @@ use std::thread;
 
 mod engine_drive;
 mod http;
+mod lane_health;
 mod routes;
 mod schedule;
 
