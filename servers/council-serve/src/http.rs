@@ -39,7 +39,7 @@ pub fn write_text(mut stream: TcpStream, code: u16, body: &str) -> std::io::Resu
         "HTTP/1.1 {} {}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         code,
         reason,
-        body.as_bytes().len()
+        body.len()
     );
     stream.write_all(head.as_bytes())?;
     stream.write_all(body.as_bytes())?;

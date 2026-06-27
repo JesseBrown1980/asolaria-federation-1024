@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use asolaria_server_vote_quorum::canon;
 
+use crate::schedule;
 use crate::Shared;
 
 fn hbp_escape(s: &str) -> String {
@@ -42,6 +43,7 @@ pub fn route(shared: &Arc<Shared>, method: &str, path: &str, _query: &str) -> (u
             200,
             String::from("LOOPVETO|ok=1|status=staged|read_only=true|veto_submitted=false|operator_witness_required=true|cutover=false|json=0\n"),
         ),
+        ("GET", "/api/loop/schedule") => schedule_route(),
         _ => (
             404,
             format!("COUNCILSERVE|ok=0|error=unknown_route|path={}|json=0\n", hbp_escape(path)),
@@ -90,6 +92,126 @@ fn parity(shared: &Arc<Shared>) -> (u16, String) {
         }
     }
     (if ok { 200 } else { 500 }, out)
+}
+
+/// Read-only confidence-scheduled-verify route (the DSpark lesson applied to the crank). Reads the
+/// loop ledger (ndjson of proposals) from `ASOLARIA_LOOP_LEDGER`; if unset/empty -> STAGED (ledger
+/// unwired), never a fake clean schedule. Verify budget / accept threshold are env-tunable. STAGED:
+/// it computes verify INTENT only and NEVER fires.
+fn schedule_route() -> (u16, String) {
+    let path = std::env::var("ASOLARIA_LOOP_LEDGER")
+        .ok()
+        .filter(|p| !p.is_empty());
+    let Some(path) = path else {
+        return (
+            200,
+            String::from("COUNCILSCHEDULE|ok=1|status=staged|read_only=true|source=loop_ledger_unwired|hint=set_ASOLARIA_LOOP_LEDGER|scheduler=confidence_scheduled_verify|fire=false|cutover=false|json=0\n"),
+        );
+    };
+    let body = match fs::read_to_string(&path) {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                500,
+                format!(
+                    "COUNCILSCHEDULE|ok=0|error=ledger_unreadable|kind={}|json=0\n",
+                    hbp_escape(&e.kind().to_string())
+                ),
+            )
+        }
+    };
+    render_schedule(
+        &body,
+        env_usize("ASOLARIA_VERIFY_BUDGET", 8),
+        env_f64("ASOLARIA_ACCEPT_THRESHOLD", 0.5),
+    )
+}
+
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default)
+}
+
+fn env_f64(key: &str, default: f64) -> f64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default)
+}
+
+/// Pure: parse an ndjson loop ledger, run the confidence schedule, render json=0 HBP rows. Never fires.
+fn render_schedule(body: &str, budget: usize, threshold: f64) -> (u16, String) {
+    let mut proposals = Vec::new();
+    let mut legacy = 0u64;
+    for line in body.lines() {
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        match parse_proposal(t) {
+            Some(p) => proposals.push(p),
+            None => legacy += 1,
+        }
+    }
+    let sched = schedule::confidence_schedule(&proposals, budget, threshold);
+    let verify_n = sched.iter().filter(|s| s.verify).count();
+    let mut out = format!(
+        "COUNCILSCHEDULE|ok=1|status=staged|read_only=true|scheduler=confidence_scheduled_verify|total={}|verify={}|defer={}|legacy={}|budget={}|threshold={:.3}|fire=false|cutover=false|json=0\n",
+        proposals.len(),
+        verify_n,
+        proposals.len().saturating_sub(verify_n),
+        legacy,
+        budget,
+        threshold
+    );
+    for s in &sched {
+        out.push_str(&format!(
+            "COUNCILSCHED|rank={}|id={}|confidence={:.4}|action={}|fire=false|json=0\n",
+            s.rank,
+            hbp_escape(&s.id),
+            s.confidence,
+            if s.verify { "VERIFY" } else { "DEFER" }
+        ));
+    }
+    (200, out)
+}
+
+/// Parse one ndjson loop-ledger line into a Proposal. Requires `id` + `score` (GNN confidence);
+/// `genius` falls back to `score` (reverse-gain not yet run), `risk` to 0.0. Unparseable -> None.
+fn parse_proposal(line: &str) -> Option<schedule::Proposal> {
+    let id = json_str(line, "id")?;
+    let score = json_num(line, "score")?;
+    let genius = json_num(line, "genius").unwrap_or(score);
+    let risk = json_num(line, "risk").unwrap_or(0.0);
+    Some(schedule::Proposal {
+        id,
+        score,
+        genius,
+        risk,
+    })
+}
+
+fn json_str(s: &str, key: &str) -> Option<String> {
+    let pat = format!("\"{key}\"");
+    let i = s.find(&pat)? + pat.len();
+    let after = s[i..].trim_start_matches([' ', ':']);
+    let after = after.strip_prefix('"')?;
+    let end = after.find('"')?;
+    Some(after[..end].to_string())
+}
+
+fn json_num(s: &str, key: &str) -> Option<f64> {
+    let pat = format!("\"{key}\"");
+    let i = s.find(&pat)? + pat.len();
+    let after = s[i..].trim_start_matches([' ', ':']);
+    let end = after
+        .find(|c: char| {
+            !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E')
+        })
+        .unwrap_or(after.len());
+    after[..end].parse::<f64>().ok()
 }
 
 #[cfg(test)]
@@ -203,5 +325,68 @@ mod tests {
             3
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(test)]
+mod schedule_route_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn parse_proposal_reads_score_and_defaults_genius_to_score() {
+        let p = parse_proposal(r#"{"id":"x1","score":0.8,"risk":0.1}"#).unwrap();
+        assert_eq!(p.id, "x1");
+        assert!((p.score - 0.8).abs() < 1e-9);
+        assert!((p.genius - 0.8).abs() < 1e-9); // genius falls back to score
+        assert!((p.risk - 0.1).abs() < 1e-9);
+        assert!(parse_proposal(r#"{"no_id":true}"#).is_none());
+        assert!(parse_proposal("not json").is_none());
+    }
+
+    #[test]
+    fn render_schedule_rations_verify_and_never_fires() {
+        let ledger = "{\"id\":\"hi\",\"score\":0.9,\"genius\":0.9}\n{\"id\":\"lo\",\"score\":0.1,\"genius\":0.1}\n";
+        let (code, body) = render_schedule(ledger, 1, 0.5);
+        assert_eq!(code, 200);
+        assert!(body.contains("scheduler=confidence_scheduled_verify"));
+        assert!(body.contains("total=2"));
+        assert!(body.contains("verify=1"));
+        assert!(body.contains("action=VERIFY"));
+        assert!(body.contains("action=DEFER"));
+        assert!(body.contains("fire=false"));
+        assert!(!body.contains('{'));
+        // the high-survival proposal is the one ranked first
+        assert!(body.contains("rank=0|id=hi"));
+    }
+
+    #[test]
+    fn render_schedule_empty_ledger_is_clean_zero_not_faked() {
+        let (code, body) = render_schedule("", 8, 0.5);
+        assert_eq!(code, 200);
+        assert!(body.contains("total=0"));
+        assert!(body.contains("verify=0"));
+        assert!(body.contains("fire=false"));
+    }
+
+    #[test]
+    fn schedule_route_is_wired_read_only_and_never_fires() {
+        let sh = Arc::new(Shared {
+            vote_dir: PathBuf::from("."),
+        });
+        let (code, body) = route(&sh, "GET", "/api/loop/schedule", "");
+        assert_ne!(code, 404, "schedule route must be wired");
+        assert!(!body.contains("error=unknown_route"));
+        // staged or rendered branch -> fire=false; unreadable-ledger branch -> ledger_unreadable. Never fires.
+        assert!(body.contains("fire=false") || body.contains("ledger_unreadable"));
+        assert!(!body.contains('{'));
+    }
+
+    #[test]
+    fn no_post_fire_on_schedule_route() {
+        let sh = Arc::new(Shared {
+            vote_dir: PathBuf::from("."),
+        });
+        assert_eq!(route(&sh, "POST", "/api/loop/schedule", "fire=1").0, 404);
     }
 }
