@@ -26,6 +26,7 @@ members = [
     "servers/fischer-eval",
     "servers/vote-quorum",
     "servers/council-serve",
+    "servers/dashboard-serve",
     "tools/recall-serve",
 ]
 
