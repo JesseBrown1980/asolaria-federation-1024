@@ -9,6 +9,8 @@
 /// How fresh a branch is relative to its base.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Freshness {
+    /// Required branch comparison fields are missing/invalid. Fail closed.
+    Unknown,
     /// Up to date with base (behind_by == 0). The branch's own commits (ahead_by) are fine.
     Fresh,
     /// Behind base with NO own commits (behind_by > 0, ahead_by == 0) — a clean fast-forward.
@@ -20,6 +22,7 @@ pub enum Freshness {
 impl Freshness {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Freshness::Unknown => "unknown",
             Freshness::Fresh => "fresh",
             Freshness::Stale => "stale",
             Freshness::Diverged => "diverged",
@@ -48,7 +51,10 @@ impl RefreshAction {
 }
 
 /// Assess freshness from the ahead/behind counts (as `gh api .../compare` reports them).
-pub fn assess(ahead_by: u64, behind_by: u64) -> Freshness {
+pub fn assess(ahead_by: Option<u64>, behind_by: Option<u64>) -> Freshness {
+    let (Some(ahead_by), Some(behind_by)) = (ahead_by, behind_by) else {
+        return Freshness::Unknown;
+    };
     if behind_by == 0 {
         Freshness::Fresh
     } else if ahead_by == 0 {
@@ -60,10 +66,22 @@ pub fn assess(ahead_by: u64, behind_by: u64) -> Freshness {
 
 /// Recommend the refresh action. `conflicting` = git/GitHub reports a real conflict (mergeStateStatus
 /// DIRTY). Decides intent only.
-pub fn recommend(freshness: Freshness, conflicting: bool) -> (RefreshAction, &'static str) {
+pub fn recommend(freshness: Freshness, conflicting: Option<bool>) -> (RefreshAction, &'static str) {
+    if freshness == Freshness::Unknown {
+        return (
+            RefreshAction::Block,
+            "missing ahead/behind counts — cannot assess freshness",
+        );
+    }
     if freshness == Freshness::Fresh {
         return (RefreshAction::Ready, "up to date with base");
     }
+    let Some(conflicting) = conflicting else {
+        return (
+            RefreshAction::Block,
+            "missing conflict status — cannot choose refresh action",
+        );
+    };
     if conflicting {
         return (
             RefreshAction::Block,
@@ -78,6 +96,10 @@ pub fn recommend(freshness: Freshness, conflicting: bool) -> (RefreshAction, &'s
         Freshness::Diverged => (
             RefreshAction::Rebase,
             "behind + own commits — rebase onto base",
+        ),
+        Freshness::Unknown => (
+            RefreshAction::Block,
+            "missing ahead/behind counts — cannot assess freshness",
         ),
         Freshness::Fresh => (RefreshAction::Ready, "up to date with base"),
     }
@@ -95,23 +117,33 @@ mod tests {
 
     #[test]
     fn assess_maps_ahead_behind_to_freshness() {
-        assert_eq!(assess(3, 0), Freshness::Fresh); // ahead only = up to date with base
-        assert_eq!(assess(0, 0), Freshness::Fresh);
-        assert_eq!(assess(0, 5), Freshness::Stale); // behind, no own commits
-        assert_eq!(assess(2, 5), Freshness::Diverged); // behind + own commits
+        assert_eq!(assess(Some(3), Some(0)), Freshness::Fresh); // ahead only = up to date with base
+        assert_eq!(assess(Some(0), Some(0)), Freshness::Fresh);
+        assert_eq!(assess(Some(0), Some(5)), Freshness::Stale); // behind, no own commits
+        assert_eq!(assess(Some(2), Some(5)), Freshness::Diverged); // behind + own commits
+        assert_eq!(assess(None, Some(0)), Freshness::Unknown);
+        assert_eq!(assess(Some(0), None), Freshness::Unknown);
     }
 
     #[test]
     fn recommend_fresh_is_ready() {
-        assert_eq!(recommend(Freshness::Fresh, false).0, RefreshAction::Ready);
+        assert_eq!(
+            recommend(Freshness::Fresh, Some(false)).0,
+            RefreshAction::Ready
+        );
         // even if "conflicting" is mis-set, fresh short-circuits to ready
-        assert_eq!(recommend(Freshness::Fresh, true).0, RefreshAction::Ready);
+        assert_eq!(
+            recommend(Freshness::Fresh, Some(true)).0,
+            RefreshAction::Ready
+        );
+        // and fresh does not require conflict status.
+        assert_eq!(recommend(Freshness::Fresh, None).0, RefreshAction::Ready);
     }
 
     #[test]
     fn recommend_stale_clean_is_merge_forward() {
         assert_eq!(
-            recommend(Freshness::Stale, false).0,
+            recommend(Freshness::Stale, Some(false)).0,
             RefreshAction::MergeForward
         );
     }
@@ -119,20 +151,37 @@ mod tests {
     #[test]
     fn recommend_diverged_clean_is_rebase() {
         assert_eq!(
-            recommend(Freshness::Diverged, false).0,
+            recommend(Freshness::Diverged, Some(false)).0,
             RefreshAction::Rebase
         );
     }
 
     #[test]
     fn recommend_conflicting_blocks() {
-        assert_eq!(recommend(Freshness::Diverged, true).0, RefreshAction::Block);
-        assert_eq!(recommend(Freshness::Stale, true).0, RefreshAction::Block);
+        assert_eq!(
+            recommend(Freshness::Diverged, Some(true)).0,
+            RefreshAction::Block
+        );
+        assert_eq!(
+            recommend(Freshness::Stale, Some(true)).0,
+            RefreshAction::Block
+        );
+    }
+
+    #[test]
+    fn recommend_missing_data_blocks() {
+        assert_eq!(
+            recommend(Freshness::Unknown, Some(false)).0,
+            RefreshAction::Block
+        );
+        assert_eq!(recommend(Freshness::Stale, None).0, RefreshAction::Block);
+        assert_eq!(recommend(Freshness::Diverged, None).0, RefreshAction::Block);
     }
 
     #[test]
     fn stale_noise_flags_non_fresh_only() {
         assert!(!is_stale_noise(Freshness::Fresh));
+        assert!(is_stale_noise(Freshness::Unknown));
         assert!(is_stale_noise(Freshness::Stale));
         assert!(is_stale_noise(Freshness::Diverged));
     }
