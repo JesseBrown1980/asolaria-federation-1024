@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use asolaria_server_vote_quorum::canon;
 
+use crate::lane_event;
 use crate::lane_health;
 use crate::mcp_health;
 use crate::policy;
@@ -54,6 +55,7 @@ pub fn route(shared: &Arc<Shared>, method: &str, path: &str, _query: &str) -> (u
         ("GET", "/api/policy/evaluate") => policy_route(),
         ("GET", "/api/branch/freshness") => branch_freshness_route(),
         ("GET", "/api/mcp/health") => mcp_health_route(),
+        ("GET", "/api/lane/events") => lane_events_route(),
         _ => (
             404,
             format!("COUNCILSERVE|ok=0|error=unknown_route|path={}|json=0\n", hbp_escape(path)),
@@ -647,6 +649,142 @@ fn render_mcp_health(body: &str, stale_after_ms: u64, timeout_ms: u64) -> (u16, 
     (200, out)
 }
 
+/// Read-only lane-event provenance/ordering route (absorbed claw-code lane-event envelope = BEHCS
+/// envelope). Reads an event ledger (ndjson) from `ASOLARIA_EVENT_LEDGER`; unset/empty -> staged
+/// (never fake-clean), unreadable -> 500. Reports per-lane integrity (gaps/dups/provenance/contiguous)
+/// and whether the whole stream is replay-INTACT. ANALYZES ONLY — never reorders/drops/fires.
+fn lane_events_route() -> (u16, String) {
+    let path = std::env::var("ASOLARIA_EVENT_LEDGER")
+        .ok()
+        .filter(|p| !p.is_empty());
+    let Some(path) = path else {
+        return (
+            200,
+            String::from("LANEEVENTS|ok=1|status=staged|read_only=true|source=event_ledger_unwired|hint=set_ASOLARIA_EVENT_LEDGER|detector=behcs_envelope_provenance|fire=false|json=0\n"),
+        );
+    };
+    let body = match fs::read_to_string(&path) {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                500,
+                format!(
+                    "LANEEVENTS|ok=0|error=ledger_unreadable|kind={}|json=0\n",
+                    hbp_escape(&e.kind().to_string())
+                ),
+            )
+        }
+    };
+    render_lane_events(&body)
+}
+
+/// Precise u64 parse that reads the digit run directly (NOT via the f64 `json_num`, which loses
+/// precision above 2^53 — the full-range FNV `host_handle8` needs exact bits). Absent/non-numeric -> None.
+fn json_u64(s: &str, key: &str) -> Option<u64> {
+    let pat = format!("\"{key}\"");
+    let i = s.find(&pat)? + pat.len();
+    let after = s[i..].trim_start_matches([' ', ':']);
+    let end = after
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(after.len());
+    after.get(..end)?.parse::<u64>().ok()
+}
+
+/// Parse one ndjson event row -> lane_event::Event. Requires `lane`; `host_handle8` absent -> 0 (=>
+/// provenance Derived, not Verified); seq/lamport absent -> 0; hash absent -> "". u64 fields use the
+/// precise `json_u64` (no f64 precision loss). Unparseable (no lane) -> None.
+fn parse_event(line: &str) -> Option<lane_event::Event> {
+    let lane = json_str(line, "lane")?;
+    // host_handle8: absent -> 0 (Derived). But a key that is PRESENT yet unparseable (negative /
+    // > u64::MAX / non-numeric) is corrupt addressing -> substitute a value that cannot equal
+    // FNV(lane) so provenance reads Mismatch, never clean-Derived (adversarial-review fix).
+    let host_handle8 = match json_u64(line, "host_handle8") {
+        Some(h) => h,
+        None if line.contains("\"host_handle8\"") => {
+            lane_event::host_handle8(&lane).wrapping_add(1) // != FNV(lane) -> Mismatch
+        }
+        None => 0,
+    };
+    Some(lane_event::Event {
+        lane,
+        host_handle8,
+        seq: json_u64(line, "seq").unwrap_or(0),
+        lamport: json_u64(line, "lamport").unwrap_or(0),
+        hash: json_str(line, "hash").unwrap_or_default(),
+    })
+}
+
+/// Pure: parse the event ledger, analyze per-lane integrity, render json=0 HBP. `intact=` is true
+/// only if EVERY lane is contiguous (no gap), dup-free, and provenance-clean — never fake-clean over a
+/// gap. Analyzes only; never reorders/drops/fires.
+fn render_lane_events(body: &str) -> (u16, String) {
+    let mut events = Vec::new();
+    let mut legacy = 0u64;
+    for line in body.lines() {
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        match parse_event(t) {
+            Some(e) => events.push(e),
+            None => legacy += 1,
+        }
+    }
+    let summaries = lane_event::analyze(&events);
+    // gap_count can be near-u64::MAX per corrupt lane, so SATURATE the cross-lane sum (a plain .sum()
+    // would overflow-panic in debug on two huge-span lanes — a residual of the gaps() DoS fix).
+    let gap_events: usize = summaries
+        .iter()
+        .map(|l| l.gap_count)
+        .fold(0usize, usize::saturating_add);
+    let dup_events: usize = summaries.iter().map(|l| l.dup_count).sum();
+    let conflict_events: usize = summaries.iter().map(|l| l.conflict_count).sum();
+    let provenance_mismatch = summaries
+        .iter()
+        .filter(|l| l.provenance == lane_event::Provenance::Mismatch)
+        .count();
+    // intact requires NOTHING dropped (legacy==0) AND every lane clean. An empty file (legacy 0,
+    // no lanes) stays legit clean-zero=intact; a corrupt all-legacy ledger (legacy>0, 0 lanes) reads
+    // intact=false instead of vacuously true (adversarial-review fix).
+    let intact = legacy == 0 && summaries.iter().all(|l| l.contiguous);
+    // Canonical replay order (lamport,lane,seq); count events that did NOT arrive in that order —
+    // i.e. how interleaved/reordered the live stream is. 0 = the ledger was already canonical.
+    let order = lane_event::canonical_order(&events);
+    let out_of_order = order
+        .iter()
+        .enumerate()
+        .filter(|(k, &arrival)| *k != arrival)
+        .count();
+    let mut out = format!(
+        "LANEEVENTS|ok=1|status=ok|read_only=true|detector=behcs_envelope_provenance|total={}|lanes={}|gap_events={}|dup_events={}|conflict_events={}|provenance_mismatch={}|intact={}|out_of_order={}|legacy={}|fire=false|json=0\n",
+        events.len(),
+        summaries.len(),
+        gap_events,
+        dup_events,
+        conflict_events,
+        provenance_mismatch,
+        intact,
+        out_of_order,
+        legacy
+    );
+    for l in &summaries {
+        out.push_str(&format!(
+            "EVLANE|lane={}|handle8={:016x}|count={}|seq_min={}|seq_max={}|gaps={}|dups={}|conflicts={}|provenance={}|contiguous={}|fire=false|json=0\n",
+            hbp_escape(&l.lane),
+            l.handle8,
+            l.count,
+            l.seq_min,
+            l.seq_max,
+            l.gap_count,
+            l.dup_count,
+            l.conflict_count,
+            l.provenance.as_str(),
+            l.contiguous
+        ));
+    }
+    (200, out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1132,5 +1270,161 @@ mod mcp_health_route_tests {
         assert!(body.contains("fire=false") || body.contains("ledger_unreadable"));
         assert!(!body.contains('{'));
         assert_eq!(route(&sh, "POST", "/api/mcp/health", "fire=1").0, 404);
+    }
+}
+
+#[cfg(test)]
+mod lane_events_route_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn json_u64_is_precise_above_2_53() {
+        // FNV handles exceed 2^53; f64-routed parsing would corrupt them — json_u64 must be exact.
+        let big = 0xcbf2_9ce4_8422_2325u64; // 14695981039346656037
+        let line = format!(r#"{{"host_handle8":{big}}}"#);
+        assert_eq!(json_u64(&line, "host_handle8"), Some(big));
+        assert_eq!(json_u64(r#"{"seq":42}"#, "seq"), Some(42));
+        assert!(json_u64(r#"{"x":1}"#, "seq").is_none());
+    }
+
+    #[test]
+    fn parse_event_requires_lane_defaults_safe() {
+        let e = parse_event(r#"{"lane":"fab","seq":3,"lamport":7}"#).unwrap();
+        assert_eq!(e.lane, "fab");
+        assert_eq!(e.seq, 3);
+        assert_eq!(e.lamport, 7);
+        assert_eq!(e.host_handle8, 0); // absent -> 0 -> Derived provenance
+        assert!(parse_event(r#"{"no_lane":1}"#).is_none());
+    }
+
+    #[test]
+    fn render_lane_events_flags_gaps_dups_mismatch_not_fake_clean() {
+        // lane A clean+verified; lane B has a gap (lost seq 2); lane C has a forged handle.
+        let ha = lane_event::host_handle8("A");
+        let ledger = [
+            format!(r#"{{"lane":"A","host_handle8":{ha},"seq":1,"lamport":1,"hash":"a1"}}"#),
+            format!(r#"{{"lane":"A","host_handle8":{ha},"seq":2,"lamport":2,"hash":"a2"}}"#),
+            r#"{"lane":"B","seq":1,"lamport":1,"hash":"b1"}"#.to_string(),
+            r#"{"lane":"B","seq":3,"lamport":3,"hash":"b3"}"#.to_string(), // seq 2 lost -> gap
+            r#"{"lane":"C","host_handle8":48879,"seq":1,"lamport":1,"hash":"c1"}"#.to_string(), // bad handle
+        ]
+        .join("\n");
+        let (code, body) = render_lane_events(&ledger);
+        assert_eq!(code, 200);
+        assert!(body.contains("detector=behcs_envelope_provenance"));
+        assert!(body.contains("total=5"));
+        assert!(body.contains("lanes=3"));
+        assert!(body.contains("gap_events=1"), "{body}"); // B missing seq 2
+        assert!(body.contains("provenance_mismatch=1"), "{body}"); // C forged
+        assert!(body.contains("intact=false"), "{body}"); // gap or mismatch -> not intact
+        assert!(body.contains(&format!("lane=A|handle8={ha:016x}|count=2|seq_min=1|seq_max=2|gaps=0|dups=0|conflicts=0|provenance=verified|contiguous=true")));
+        assert!(
+            body.contains("lane=B|")
+                && body.contains("gaps=1|dups=0|conflicts=0|provenance=derived|contiguous=false")
+        );
+        assert!(body.contains("lane=C|") && body.contains("provenance=mismatch|contiguous=false"));
+        assert!(body.contains("fire=false"));
+        assert!(!body.contains('{'));
+    }
+
+    #[test]
+    fn render_lane_events_conflict_distinct_hash_at_same_seq() {
+        // same (lane,seq) with DIFFERENT hashes = a forked slot — conflict, worse than a replay.
+        let ledger = [
+            r#"{"lane":"x","seq":1,"lamport":1,"hash":"v1"}"#,
+            r#"{"lane":"x","seq":1,"lamport":1,"hash":"v2"}"#,
+        ]
+        .join("\n");
+        let (_, body) = render_lane_events(&ledger);
+        assert!(body.contains("dup_events=1"), "{body}");
+        assert!(body.contains("conflict_events=1"), "{body}");
+        assert!(body.contains("intact=false"), "{body}");
+        assert!(body.contains("dups=1|conflicts=1|"), "{body}");
+    }
+
+    #[test]
+    fn render_lane_events_dup_breaks_intact() {
+        let ledger = "{\"lane\":\"x\",\"seq\":1}\n{\"lane\":\"x\",\"seq\":1}\n"; // same (lane,seq) twice
+        let (_, body) = render_lane_events(ledger);
+        assert!(body.contains("dup_events=1"), "{body}");
+        assert!(body.contains("intact=false"));
+    }
+
+    #[test]
+    fn render_lane_events_counts_out_of_order_arrivals() {
+        // arrival order is lamport 3 then 1 then 2 -> not canonical; canonical is 1,2,3.
+        let ledger = [
+            r#"{"lane":"a","seq":3,"lamport":3}"#,
+            r#"{"lane":"a","seq":1,"lamport":1}"#,
+            r#"{"lane":"a","seq":2,"lamport":2}"#,
+        ]
+        .join("\n");
+        let (_, body) = render_lane_events(&ledger);
+        // canonical = lam1,lam2,lam3 = arrival [1,2,0]; all three positions differ from arrival.
+        assert!(body.contains("out_of_order=3"), "{body}");
+        // already-canonical arrival -> 0
+        let ordered = [
+            r#"{"lane":"a","seq":1,"lamport":1}"#,
+            r#"{"lane":"a","seq":2,"lamport":2}"#,
+        ]
+        .join("\n");
+        let (_, b2) = render_lane_events(&ordered);
+        assert!(b2.contains("out_of_order=0"), "{b2}");
+    }
+
+    #[test]
+    fn render_lane_events_empty_is_clean_zero_intact() {
+        let (code, body) = render_lane_events("");
+        assert_eq!(code, 200);
+        assert!(body.contains("total=0"));
+        assert!(body.contains("lanes=0"));
+        assert!(body.contains("intact=true")); // empty file (legacy 0) = legit clean-zero
+    }
+
+    #[test]
+    fn render_lane_events_all_legacy_is_not_intact() {
+        // ADVERSARIAL-REVIEW FIX: a non-empty ledger whose every row fails parse is a BROKEN ledger,
+        // not a clean one — it must NOT read intact=true vacuously.
+        let ledger = "{\"node\":\"x\",\"seq\":1}\n{\"node\":\"y\",\"seq\":2}\n";
+        let (_, body) = render_lane_events(ledger);
+        assert!(body.contains("total=0"));
+        assert!(body.contains("legacy=2"));
+        assert!(body.contains("intact=false"), "{body}"); // dropped rows -> not intact
+    }
+
+    #[test]
+    fn render_lane_events_present_but_invalid_handle_is_mismatch_not_clean() {
+        // ADVERSARIAL-REVIEW FIX: host_handle8 present but unparseable = corrupt addressing -> the
+        // lane must read provenance=mismatch / not intact, never clean-Derived.
+        let ledger = r#"{"lane":"x","host_handle8":"garbage","seq":1,"lamport":1,"hash":"h"}"#;
+        let (_, body) = render_lane_events(ledger);
+        assert!(body.contains("provenance_mismatch=1"), "{body}");
+        assert!(body.contains("provenance=mismatch"), "{body}");
+        assert!(body.contains("intact=false"), "{body}");
+    }
+
+    #[test]
+    fn render_lane_events_legacy_row_counted_not_dropped() {
+        let ledger = "{\"lane\":\"x\",\"seq\":1}\n{\"no_lane\":1}\n";
+        let (_, body) = render_lane_events(ledger);
+        assert!(body.contains("total=1"));
+        assert!(body.contains("legacy=1"));
+    }
+
+    #[test]
+    fn lane_events_route_wired_read_only_no_fire() {
+        let sh = Arc::new(Shared {
+            vote_dir: PathBuf::from("."),
+        });
+        let (code, body) = route(&sh, "GET", "/api/lane/events", "");
+        assert_ne!(code, 404, "lane events route must be wired");
+        assert!(
+            body.contains("detector=behcs_envelope_provenance")
+                || body.contains("ledger_unreadable")
+        );
+        assert!(body.contains("fire=false") || body.contains("ledger_unreadable"));
+        assert!(!body.contains('{'));
+        assert_eq!(route(&sh, "POST", "/api/lane/events", "fire=1").0, 404);
     }
 }
