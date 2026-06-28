@@ -108,6 +108,19 @@ Total concurrent agent budget: **~72** across the federation.
 
 Endpoints, vault rotation, and per-vantage role canon live in the 200-step plan and the linked memory files.
 
+### Falcon orbital endpoint (2026-06-28)
+
+Falcon now has an append-only OmniSCRPY orbital registration path for USB-free
+visual/control work:
+
+- receipt generator: [`tools/omniscrcpy/omniscrcpy-orbital-link.mjs`](./tools/omniscrcpy/omniscrcpy-orbital-link.mjs)
+- operating notes: [`tools/omniscrcpy/README-ORBITAL.md`](./tools/omniscrcpy/README-ORBITAL.md)
+- latest tuple receipt: `tools/omniscrcpy/broadcasts/orbital/latest-falcon-orbital.hbp`
+
+The public slice records only handles, endpoints, PID8, timestamps, SHA values,
+and 60D catalog axes. Private keys, vault paths, and device serials stay in the
+owning backend.
+
 ---
 
 ## Anti-bloat manifesto

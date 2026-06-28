@@ -12,7 +12,7 @@ Consumers MUST treat unknown fields as forward-compatible additions and ignore t
   "id": "agent-<vantage>-<role>-<index>",
   "pid": "<BEHCS-1024 anchor>",
   "vantage": "acer | liris | falcon | aether | this-session",
-  "role": "Hermes | Space-deck-driver | Space-agent | PI | Omnispindle | Omniflywheel | Big-Pickle | sub-agent | operator-witness | resident",
+  "role": "Hermes | Space-deck-driver | Space-agent | PI | Omnispindle | Omniflywheel | Big-Pickle | OmniSCRPY-orbital-visual-supervisor | omnicoder-orbital-endpoint | orbital-attach-supervisor | sub-agent | operator-witness | resident",
   "tier": "T1 | T2 | T3",
   "status": "registered | active | retired",
   "registered_at": "<iso8601 Z>",
@@ -29,7 +29,7 @@ Consumers MUST treat unknown fields as forward-compatible additions and ignore t
 | `id` | string | Stable identifier. Pattern `agent-<vantage>-<role-slug>-<index>`. Role-slug lowercase, dashes only. Index zero-padded to 2 digits. |
 | `pid` | string | BEHCS-1024 anchor. Pattern `AGENT-PID-H<6-hex>-A<vantage-code>-N<index>`. Vantage codes: `01`=acer, `02`=liris, `03`=falcon, `04`=aether, `05`=this-session. |
 | `vantage` | enum | Where the agent runs. `this-session` denotes ephemeral sub-agents spawned by an acer-claude session. |
-| `role` | enum | Named role or generic class. Named roles (`Hermes`, `Space-deck-driver`, `Space-agent`, `PI`, `Omnispindle`, `Omniflywheel`, `Big-Pickle`) are singletons unless multi-instance is explicitly cosigned. `sub-agent` is the ephemeral task-runner class. `operator-witness` is reserved for Big-Pickle. `resident` is the catch-all for vantage-resident agents without a named role. |
+| `role` | enum | Named role or generic class. Named roles (`Hermes`, `Space-deck-driver`, `Space-agent`, `PI`, `Omnispindle`, `Omniflywheel`, `Big-Pickle`) are singletons unless multi-instance is explicitly cosigned. `OmniSCRPY-orbital-visual-supervisor`, `omnicoder-orbital-endpoint`, and `orbital-attach-supervisor` register the USB-free visual/control orbital path. `sub-agent` is the ephemeral task-runner class. `operator-witness` is reserved for Big-Pickle. `resident` is the catch-all for vantage-resident agents without a named role. |
 | `tier` | enum | T1 = federation singletons (Hermes, Omnispindle, Omniflywheel, Big-Pickle, PI). T2 = vantage leads (Space-deck-driver, Space-agent, vantage residents). T3 = sub-agents / ephemerals. |
 | `status` | enum | `registered` = entry exists, no live process. `active` = process attached, heartbeats ack'd. `retired` = ended (kept for ledger). |
 | `registered_at` | string | ISO-8601 UTC. Initial seed uses `2026-05-11T16:45:00Z`. |
@@ -60,6 +60,16 @@ Consumers MUST treat unknown fields as forward-compatible additions and ignore t
 | aether | 6 | Vantage residents (Felipe's Galaxy A06) |
 | this-session | 18 | Ephemeral sub-agents |
 | **total** | **72** | |
+
+## Orbital additions (2026-06-28)
+
+These rows are append-only additions after the initial seed:
+
+| Vantage | Count | Notes |
+|---|---:|---|
+| falcon | +1 active | `omnicoder-orbital-endpoint`; `OPERATOR_OBSERVED_ACER` WiFi/LAN orbit |
+| falcon | +1 registered | `OmniSCRPY-orbital-visual-supervisor`; dashboard/map ingest lane |
+| liris | +1 registered | `orbital-attach-supervisor`; pending Liris-to-Falcon attach receipts |
 
 ## Example row (literal)
 
