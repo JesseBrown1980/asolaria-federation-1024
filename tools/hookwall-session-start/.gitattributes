@@ -1,0 +1,4 @@
+# rules.txt is the parity payload — its exact LF bytes ARE the contract
+# (sha256 9184f2320fcf1a693304abba7960886014a9704c8841d77e96b96aeeee8e3cd3).
+# Never let git touch its line endings on any host, or cross-colony parity breaks.
+rules.txt -text

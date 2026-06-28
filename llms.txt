@@ -1,0 +1,41 @@
+# llms.txt - asolaria-federation-1024
+
+Purpose: agent-readable front door for the Host8 / Rust kernel target repo.
+
+Status: docs-first / E=0. Reading this file does not authorize CI, redeploy, spawn, or cutover.
+
+Read order:
+1. README.md - current state of the Rust 8-byte host and kernel rung.
+2. MAP.md - current whole-system map and satellite roles.
+3. HOST8-PARITY.md - source -> Rust target map; source/built/running/live separated.
+4. kernel/docs/MICROKERNEL_REFACTOR_PLAN.md - kernel refactor context.
+5. servers/agent-runtime/src/lib.rs and servers/agent-runtime/src/rooms.rs - Host8 agent/runtime and room source.
+6. tools/recall-serve/src/main.rs - recall server source; do not globalize any one seat's port map.
+
+Core meaning:
+- This repo is the Host8 kernel/rust target rung, not the whole Asolaria root.
+- The root primitive is the watcher-gated, infinitely nestable 8-byte agent across multiple agent
+  types and vantages.
+- Node/BigPickle/omnidispatcher docs are source/oracle strata until Rust parity is proven.
+
+Evidence boundaries:
+- SOURCE: files in this repo.
+- BUILT: only after the owning Rust 1.81 CI/build gate.
+- RUNNING: only after probing the owning host process/port.
+- LIVE_FIRED: E!=0 materialization; not implied by source or running server.
+- STUBBED: frozen-potential rooms/dashboard surfaces are not failures.
+
+Hard holds:
+- No 1.81 CI claim unless the owning CI actually ran.
+- No :5088 redeploy.
+- No dashboard port.
+- No agent spawn.
+- No USB-SOVLINUX enumeration.
+- No 35TB ADC.
+- No live census.
+- No private-root scan.
+
+Useful attack-verify:
+- Recompute this file's sidecar.
+- Verify HOST8-PARITY.md sidecar.
+- Compare any live claims against owning-seat probes, not this file.

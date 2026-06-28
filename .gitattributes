@@ -3,3 +3,6 @@
 *.ndjson text eol=lf
 *.rs text eol=lf
 *.toml text eol=lf
+Cargo.toml eol=lf
+Cargo.lock eol=lf
+servers/vote-quorum/** eol=lf

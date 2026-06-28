@@ -3,9 +3,30 @@
 **Anchor PID:** `ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11`
 **Authorized:** 2026-05-11T16:40Z · quintuple-cosign window 2026-05-11 → 2026-05-25
 **Operator pair:** OP-JESSE-BROWN + OP-RAYSSA-CHIQUETO · **Witnesses:** Amy + Felipe + Dan
-**Status:** PHASE 1 (Genesis & Authorization) · see [`ASOLARIA_FEDERATION_REMAKE_200_STEP_PLAN.md`](./ASOLARIA_FEDERATION_REMAKE_200_STEP_PLAN.md)
+**Status:** **LIVE / building** (updated 2026-06-28) — the `no_std` kernel + **10 server crates** are built and `cargo`-green; the Host-8 lane runs. The genesis block above is the founding authorization record; current build progress is in [`ASOLARIA_FEDERATION_REMAKE_200_STEP_PLAN.md`](./ASOLARIA_FEDERATION_REMAKE_200_STEP_PLAN.md). **Read the tree, not the genesis date.**
 
 A bare-metal-floor-up remake of the Asolaria fabric as a BEHCS-1024-native operating system with hookwall and GNN as kernel-adjacent primitives, deployed across a 4-device federation.
+
+---
+
+## Current state (2026-06-28) — the kernel is built
+
+This repo **is** the live Rust **8-byte host** — the **kernel rung** of the Asolaria evolution (see
+[`MAP.md`](./MAP.md)). It is the **Node→Rust upgrade target**: the Node-era specs/guides (the spine +
+fleet-internal repos in `MAP.md`) land here as Rust Host-8. What's built (read the tree):
+
+- **`kernel/`** — the `no_std` kernel (`boot`, `core`, `tests`, `docs`).
+- **`servers/`** — **10 Host-8 server crates**: `council-serve` (the loop/council responder +
+  ptc_dispatch / lane_health / recovery / schedule / policy / stale_branch / mcp_health / lane_event),
+  `host8-serve`, `agent-runtime`, `gnn-oracle`, `vote-quorum`, `cosign-ledger`, `dashboard-serve`,
+  `fischer-eval`, `tier-policy`, `highway`.
+- branch **`acer/fleet-capacity-20k`** stacks the Host-8 ports of the whole pipeline (FEDENV validator ·
+  white-room `Scorer`/Omniflywheel · C/D substrate rooms · spawn-gate ring · agent registry · 20k fleet
+  capacity).
+
+All gated / **E=0** — the engine never fires here (`process_launch=0`, no cutover without operator T0).
+Dangling docs being reconciled: `COSIGN_CHAIN.ndjson`, `PHASE_TRACKER.ndjson`, `scripts/build-img.sh`,
+`docs/onboarding.md`.
 
 ---
 
@@ -86,6 +107,19 @@ The kernel boots from a USB image. Every syscall passes through hookwall pre/pos
 Total concurrent agent budget: **~72** across the federation.
 
 Endpoints, vault rotation, and per-vantage role canon live in the 200-step plan and the linked memory files.
+
+### Falcon orbital endpoint (2026-06-28)
+
+Falcon now has an append-only OmniSCRPY orbital registration path for USB-free
+visual/control work:
+
+- receipt generator: [`tools/omniscrcpy/omniscrcpy-orbital-link.mjs`](./tools/omniscrcpy/omniscrcpy-orbital-link.mjs)
+- operating notes: [`tools/omniscrcpy/README-ORBITAL.md`](./tools/omniscrcpy/README-ORBITAL.md)
+- latest tuple receipt: `tools/omniscrcpy/broadcasts/orbital/latest-falcon-orbital.hbp`
+
+The public slice records only handles, endpoints, PID8, timestamps, SHA values,
+and 60D catalog axes. Private keys, vault paths, and device serials stay in the
+owning backend.
 
 ---
 
