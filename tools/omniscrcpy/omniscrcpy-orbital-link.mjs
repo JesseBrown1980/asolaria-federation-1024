@@ -183,13 +183,16 @@ function makeReceipt(opts) {
 
 async function maybePost(bus, receipt) {
   if (!flag("post")) return { attempted: false };
+  const postJson = flag("post-json");
   const r = await fetch(bus, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ schema: receipt.schema, rows: receipt.rows, sha16: receipt.link_sha16 }),
+    headers: { "Content-Type": postJson ? "application/json" : "text/plain; charset=utf-8" },
+    body: postJson
+      ? JSON.stringify({ schema: receipt.schema, rows: receipt.rows, sha16: receipt.link_sha16 })
+      : `${receipt.rows.join("\n")}\n`,
     signal: AbortSignal.timeout(3000)
   });
-  return { attempted: true, ok: r.ok, status: r.status, body: (await r.text()).slice(0, 200) };
+  return { attempted: true, mode: postJson ? "json_diagnostic" : "hbp_text", ok: r.ok, status: r.status, body: (await r.text()).slice(0, 200) };
 }
 
 if ((process.argv[1] || "").endsWith("omniscrcpy-orbital-link.mjs")) {
@@ -244,6 +247,7 @@ if ((process.argv[1] || "").endsWith("omniscrcpy-orbital-link.mjs")) {
       `rows=${receipt.rows.length}`,
       `agent_rows=${receipt.agent_rows.length}`,
       `post_attempted=${post.attempted ? 1 : 0}`,
+      `post_mode=${hbpEscape(post.mode || "none")}`,
       "json=0"
     ].join("|"));
   }

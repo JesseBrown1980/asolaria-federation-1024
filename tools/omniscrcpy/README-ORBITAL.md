@@ -41,11 +41,14 @@ node tools/omniscrcpy/omniscrcpy-orbital-link.mjs --json-out
 ```
 
 Use `--post` only when the target bus is intentionally reachable from the seat
-running the command:
+running the command. It posts the HBP rows as `text/plain`:
 
 ```bash
 node tools/omniscrcpy/omniscrcpy-orbital-link.mjs --post
 ```
+
+Use `--post-json` only for a compatibility endpoint that cannot accept tuple
+text.
 
 Override any endpoint without changing the source:
 
