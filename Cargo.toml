@@ -28,6 +28,7 @@ members = [
     "servers/council-serve",
     "servers/dashboard-serve",
     "tools/recall-serve",
+    "tools/hookwall-session-start",
 ]
 
 [workspace.package]

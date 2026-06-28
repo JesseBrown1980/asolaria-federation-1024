@@ -45,6 +45,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "asolaria-server-dashboard-serve"
+version = "0.1.0"
+
+[[package]]
 name = "asolaria-server-fischer-eval"
 version = "0.1.0"
 
@@ -194,6 +198,10 @@ dependencies = [
  "typenum",
  "version_check",
 ]
+
+[[package]]
+name = "hookwall-session-start"
+version = "0.1.0"
 
 [[package]]
 name = "libc"
