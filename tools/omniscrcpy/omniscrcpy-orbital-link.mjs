@@ -222,17 +222,31 @@ if ((process.argv[1] || "").endsWith("omniscrcpy-orbital-link.mjs")) {
   }
 
   const post = await maybePost(receipt.bus, receipt);
-  console.log(JSON.stringify({
-    ok: true,
-    schema: receipt.schema,
-    hbpPath,
-    jsonPath,
-    latestHbp,
-    sha16: receipt.link_sha16,
-    rows: receipt.rows.length,
-    agent_rows: receipt.agent_rows.length,
-    post
-  }, null, 2));
+  if (flag("json-out")) {
+    console.log(JSON.stringify({
+      ok: true,
+      schema: receipt.schema,
+      hbpPath,
+      jsonPath,
+      latestHbp,
+      sha16: receipt.link_sha16,
+      rows: receipt.rows.length,
+      agent_rows: receipt.agent_rows.length,
+      post
+    }, null, 2));
+  } else {
+    console.log([
+      "ORBITALWRITE",
+      `schema=${SCHEMA}`,
+      `hbp=${hbpEscape(hbpPath)}`,
+      `latest=${hbpEscape(latestHbp)}`,
+      `sha16=${receipt.link_sha16}`,
+      `rows=${receipt.rows.length}`,
+      `agent_rows=${receipt.agent_rows.length}`,
+      `post_attempted=${post.attempted ? 1 : 0}`,
+      "json=0"
+    ].join("|"));
+  }
 }
 
 export { makeReceipt, pidFor };
