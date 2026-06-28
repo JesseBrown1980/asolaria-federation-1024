@@ -12,6 +12,7 @@ use crate::lane_event;
 use crate::lane_health;
 use crate::mcp_health;
 use crate::policy;
+use crate::ptc_dispatch;
 use crate::recovery;
 use crate::schedule;
 use crate::stale_branch;
@@ -58,6 +59,7 @@ pub fn route(shared: &Arc<Shared>, method: &str, path: &str, _query: &str) -> (u
         ("GET", "/api/mcp/health") => mcp_health_route(),
         ("GET", "/api/lane/events") => lane_events_route(),
         ("GET", "/api/lane/recovery") => recovery_route(),
+        ("GET", "/api/ptc/run") => ptc_route(),
         _ => (
             404,
             format!("COUNCILSERVE|ok=0|error=unknown_route|path={}|json=0\n", hbp_escape(path)),
@@ -902,6 +904,101 @@ fn render_recovery(body: &str, max_attempts: u32) -> (u16, String) {
     (200, out)
 }
 
+/// Read-only Programmatic Tool Calling planner. Reads a declarative step ledger from
+/// `ASOLARIA_PTC_LEDGER`; unset/empty -> staged. Validates the allow-listed chain and reports how
+/// many tool turns/context bytes would be collapsed. PLANS ONLY — never calls tools or executes code.
+fn ptc_route() -> (u16, String) {
+    let path = std::env::var("ASOLARIA_PTC_LEDGER")
+        .ok()
+        .filter(|p| !p.is_empty());
+    let Some(path) = path else {
+        return (
+            200,
+            String::from("PTC|ok=1|status=staged|read_only=true|source=ptc_ledger_unwired|hint=set_ASOLARIA_PTC_LEDGER|engine=programmatic_tool_calling|execute=false|json=0\n"),
+        );
+    };
+    let body = match fs::read_to_string(&path) {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                500,
+                format!(
+                    "PTC|ok=0|error=ledger_unreadable|kind={}|json=0\n",
+                    hbp_escape(&e.kind().to_string())
+                ),
+            )
+        }
+    };
+    render_ptc(&body)
+}
+
+/// Parse one ndjson PTC step. Requires `id` and a known allow-listed `op`; unknown op -> legacy
+/// rather than recoverable. `from` is optional. `bytes` absent -> 0.
+fn parse_ptc_step(line: &str) -> Option<ptc_dispatch::Step> {
+    let id = json_str(line, "id")?;
+    let op = ptc_dispatch::ToolOp::parse(&json_str(line, "op")?)?;
+    let from = match json_str(line, "from") {
+        Some(v) => Some(v),
+        None if find_key(line, "from").is_some() => return None,
+        None => None,
+    };
+    let bytes = match json_u64(line, "bytes") {
+        Some(n) => n.min(usize::MAX as u64) as usize,
+        None if find_key(line, "bytes").is_some() => return None,
+        None => 0,
+    };
+    Some(ptc_dispatch::Step {
+        id,
+        op,
+        from,
+        bytes,
+    })
+}
+
+/// Pure: parse the PTC ledger, validate the chain, render json=0 HBP. No execution.
+fn render_ptc(body: &str) -> (u16, String) {
+    let mut steps = Vec::new();
+    let mut legacy = 0u64;
+    for line in body.lines() {
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        match parse_ptc_step(t) {
+            Some(s) => steps.push(s),
+            None => legacy += 1,
+        }
+    }
+    let p = ptc_dispatch::plan(&steps);
+    let executable = p.status == ptc_dispatch::PlanStatus::Ready && legacy == 0;
+    let mut out = format!(
+        "PTC|ok=1|status={}|reason={}|read_only=true|engine=programmatic_tool_calling|steps={}|legacy={}|raw_turns={}|ptc_turns={}|saved_turns={}|total_bytes={}|final_bytes={}|saved_context_bytes={}|final_step={}|executable={}|execute=false|json=0\n",
+        p.status.as_str(),
+        p.status.reason(),
+        p.steps,
+        legacy,
+        p.raw_turns,
+        p.ptc_turns,
+        p.saved_turns,
+        p.total_bytes,
+        p.final_bytes,
+        p.saved_context_bytes,
+        hbp_escape(&p.final_step),
+        executable
+    );
+    for (idx, s) in steps.iter().enumerate() {
+        out.push_str(&format!(
+            "PTCSTEP|idx={}|id={}|op={}|from={}|bytes={}|execute=false|json=0\n",
+            idx,
+            hbp_escape(&s.id),
+            s.op.as_str(),
+            hbp_escape(s.from.as_deref().unwrap_or("-")),
+            s.bytes
+        ));
+    }
+    (200, out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1666,5 +1763,108 @@ mod recovery_route_tests {
         assert!(body.contains("execute=false") || body.contains("ledger_unreadable"));
         assert!(!body.contains('{'));
         assert_eq!(route(&sh, "POST", "/api/lane/recovery", "execute=1").0, 404);
+    }
+}
+
+#[cfg(test)]
+mod ptc_route_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn parse_ptc_step_requires_id_and_allowlisted_op() {
+        let s = parse_ptc_step(r#"{"id":"a","op":"recall_search","from":"seed","bytes":2048}"#)
+            .unwrap();
+        assert_eq!(s.id, "a");
+        assert_eq!(s.op, ptc_dispatch::ToolOp::RecallSearch);
+        assert_eq!(s.from.as_deref(), Some("seed"));
+        assert_eq!(s.bytes, 2048);
+        assert!(parse_ptc_step(r#"{"op":"recall_search"}"#).is_none());
+        assert!(parse_ptc_step(r#"{"id":"x","op":"shell"}"#).is_none());
+    }
+
+    #[test]
+    fn render_ptc_ready_chain_reports_turn_and_context_savings() {
+        let ledger = [
+            r#"{"id":"recall","op":"recall_search","bytes":4096}"#,
+            r#"{"id":"health","op":"mcp_health","from":"recall","bytes":1024}"#,
+            r#"{"id":"final","op":"render_hbp","from":"health","bytes":256}"#,
+        ]
+        .join("\n");
+        let (code, body) = render_ptc(&ledger);
+        assert_eq!(code, 200);
+        assert!(body.contains("engine=programmatic_tool_calling"));
+        assert!(body.contains("status=ready"));
+        assert!(body.contains("steps=3"));
+        assert!(body.contains("raw_turns=3"));
+        assert!(body.contains("ptc_turns=1"));
+        assert!(body.contains("saved_turns=2"));
+        assert!(body.contains("total_bytes=5376"));
+        assert!(body.contains("final_bytes=256"));
+        assert!(body.contains("saved_context_bytes=5120"));
+        assert!(body.contains("executable=true"));
+        assert!(body.contains("execute=false"));
+        assert!(!body.contains('{'));
+    }
+
+    #[test]
+    fn render_ptc_legacy_row_prevents_executable_true() {
+        let ledger = "{\"id\":\"a\",\"op\":\"recall_search\"}\n{\"id\":\"bad\",\"op\":\"shell\"}\n";
+        let (_, body) = render_ptc(ledger);
+        assert!(body.contains("status=ready"), "{body}"); // valid rows are plannable
+        assert!(body.contains("legacy=1"), "{body}");
+        assert!(body.contains("executable=false"), "{body}"); // but dropped rows block execution
+    }
+
+    #[test]
+    fn render_ptc_present_but_malformed_fields_block_execution() {
+        // FAIL-CLOSED: present-but-unparseable metadata must not collapse to absent/clean defaults.
+        let ledger = [
+            r#"{"id":"good","op":"recall_search","bytes":10}"#,
+            r#"{"id":"bad_bytes","op":"mcp_health","bytes":"large"}"#,
+            r#"{"id":"bad_from","op":"render_hbp","from":99}"#,
+        ]
+        .join("\n");
+        let (_, body) = render_ptc(&ledger);
+        assert!(body.contains("steps=1"), "{body}");
+        assert!(body.contains("legacy=2"), "{body}");
+        assert!(body.contains("executable=false"), "{body}");
+    }
+
+    #[test]
+    fn render_ptc_bad_dependency_invalid_not_executable() {
+        let ledger = [
+            r#"{"id":"a","op":"summarize","from":"future","bytes":1}"#,
+            r#"{"id":"future","op":"render_hbp","bytes":1}"#,
+        ]
+        .join("\n");
+        let (_, body) = render_ptc(&ledger);
+        assert!(body.contains("status=invalid"));
+        assert!(body.contains("reason=missing_or_future_ref"));
+        assert!(body.contains("executable=false"));
+        assert!(body.contains("execute=false"));
+    }
+
+    #[test]
+    fn render_ptc_empty_is_staged_zero_not_ready() {
+        let (_, body) = render_ptc("");
+        assert!(body.contains("status=empty"));
+        assert!(body.contains("steps=0"));
+        assert!(body.contains("executable=false"));
+    }
+
+    #[test]
+    fn ptc_route_wired_read_only_no_execute() {
+        let sh = Arc::new(Shared {
+            vote_dir: PathBuf::from("."),
+        });
+        let (code, body) = route(&sh, "GET", "/api/ptc/run", "");
+        assert_ne!(code, 404, "PTC route must be wired");
+        assert!(
+            body.contains("engine=programmatic_tool_calling") || body.contains("ledger_unreadable")
+        );
+        assert!(body.contains("execute=false") || body.contains("ledger_unreadable"));
+        assert!(!body.contains('{'));
+        assert_eq!(route(&sh, "POST", "/api/ptc/run", "execute=1").0, 404);
     }
 }

@@ -17,6 +17,7 @@ mod lane_event;
 mod lane_health;
 mod mcp_health;
 mod policy;
+mod ptc_dispatch;
 mod recovery;
 mod routes;
 mod schedule;
