@@ -937,8 +937,16 @@ fn ptc_route() -> (u16, String) {
 fn parse_ptc_step(line: &str) -> Option<ptc_dispatch::Step> {
     let id = json_str(line, "id")?;
     let op = ptc_dispatch::ToolOp::parse(&json_str(line, "op")?)?;
-    let from = json_str(line, "from");
-    let bytes = json_u64(line, "bytes").unwrap_or(0).min(usize::MAX as u64) as usize;
+    let from = match json_str(line, "from") {
+        Some(v) => Some(v),
+        None if find_key(line, "from").is_some() => return None,
+        None => None,
+    };
+    let bytes = match json_u64(line, "bytes") {
+        Some(n) => n.min(usize::MAX as u64) as usize,
+        None if find_key(line, "bytes").is_some() => return None,
+        None => 0,
+    };
     Some(ptc_dispatch::Step {
         id,
         op,
@@ -1806,6 +1814,21 @@ mod ptc_route_tests {
         assert!(body.contains("status=ready"), "{body}"); // valid rows are plannable
         assert!(body.contains("legacy=1"), "{body}");
         assert!(body.contains("executable=false"), "{body}"); // but dropped rows block execution
+    }
+
+    #[test]
+    fn render_ptc_present_but_malformed_fields_block_execution() {
+        // FAIL-CLOSED: present-but-unparseable metadata must not collapse to absent/clean defaults.
+        let ledger = [
+            r#"{"id":"good","op":"recall_search","bytes":10}"#,
+            r#"{"id":"bad_bytes","op":"mcp_health","bytes":"large"}"#,
+            r#"{"id":"bad_from","op":"render_hbp","from":99}"#,
+        ]
+        .join("\n");
+        let (_, body) = render_ptc(&ledger);
+        assert!(body.contains("steps=1"), "{body}");
+        assert!(body.contains("legacy=2"), "{body}");
+        assert!(body.contains("executable=false"), "{body}");
     }
 
     #[test]
