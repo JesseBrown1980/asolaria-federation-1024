@@ -38,6 +38,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "asolaria-server-cosign-serve"
+version = "0.1.0"
+dependencies = [
+ "asolaria-server-cosign-ledger",
+]
+
+[[package]]
 name = "asolaria-server-council-serve"
 version = "0.1.0"
 dependencies = [

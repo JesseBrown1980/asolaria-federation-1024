@@ -22,6 +22,7 @@ members = [
     "servers/agent-runtime",
     "servers/gnn-oracle",
     "servers/cosign-ledger",
+    "servers/cosign-serve",
     "servers/host8-serve",
     "servers/fischer-eval",
     "servers/vote-quorum",
