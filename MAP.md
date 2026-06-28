@@ -32,6 +32,11 @@ tables below to see where you are; follow the links to walk the rest.
 | `asolaria-whiteroom-engine` | **liris** white-room engine — LEG-1 scorer (never-delete: genius keeps / mistake compacts) |
 | `35-TB-google-AI-Ultra-migration` | LEG-4 — the 35 TB Google Drive cloud sink |
 
+## Visual/orbital sidecars
+| surface | role | key files |
+|---------|------|-----------|
+| OmniSCRPY orbital link | USB-free visual/control endpoint registration for Falcon-style mobile vantages; emits 60D HBP/HBI rows for Hilbra, atlas/recall, visual supervisors, PID roster, dashboards, and agent teams | `tools/omniscrcpy/omniscrcpy-orbital-link.mjs`, `tools/omniscrcpy/README-ORBITAL.md`, `tools/omniscrcpy/broadcasts/orbital/latest-falcon-orbital.hbp` |
+
 ## Other core repos (the satellites — referenced by the web)
 | repo | role |
 |------|------|

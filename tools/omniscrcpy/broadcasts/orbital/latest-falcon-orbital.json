@@ -1,0 +1,142 @@
+{
+  "schema": "ASOLARIA-OMNISCRPY-ORBITAL-LINK-V1",
+  "ts": "2026-06-28T21:49:54Z",
+  "ts_unix_s": 1782683394,
+  "evidence_class": "OPERATOR_OBSERVED_ACER",
+  "source_vantage": "liris",
+  "measurement_surface": "operator_observed_acer_transcript",
+  "from": "falcon",
+  "to": "acer",
+  "host_pid8": "4c7e27b6bfb76666",
+  "endpoint": "http://192.168.1.6:8789",
+  "bind": "0.0.0.0:8789",
+  "bus": "http://192.168.1.9:4947/behcs/send",
+  "recall": "http://192.168.1.9:4796",
+  "tuple_dim": 60,
+  "levels": 16,
+  "catalogs_60d": [
+    "HILBRA",
+    "HBI",
+    "ASOLARIA_ATLAS_RECALL",
+    "OMNISCRPY",
+    "VIS_SUPERVISORS",
+    "PID_ROSTER",
+    "ORBITAL_ENDPOINT",
+    "SHANNON_RECEIPT",
+    "GAC",
+    "AGENT_TEAMS"
+  ],
+  "usb_required": 0,
+  "secret_material": 0,
+  "pii": 0,
+  "key_method": "existing_backend_registry_or_owner_key_method; public handles only",
+  "link_sha16": "a28eedf7a7c5aa57",
+  "roles": {
+    "visual_supervisor_pid": "AGENT-PID-HB48C5E-A03-N07",
+    "endpoint_pid": "AGENT-PID-H3B6634-A03-N08",
+    "liris_attach_supervisor_pid": "AGENT-PID-HA81A76-A02-N19"
+  },
+  "rows": [
+    "ORBITALREG|schema=ASOLARIA-OMNISCRPY-ORBITAL-LINK-V1|ts=2026-06-28T21:49:54Z|evidence_class=OPERATOR_OBSERVED_ACER|from=falcon|to=acer|host_pid8=4c7e27b6bfb76666|tuple_dim=60|levels=16|catalogs=HILBRA,HBI,ASOLARIA_ATLAS_RECALL,OMNISCRPY,VIS_SUPERVISORS,PID_ROSTER,ORBITAL_ENDPOINT,SHANNON_RECEIPT,GAC,AGENT_TEAMS|sha16=a28eedf7a7c5aa57|secret_material=0|pii=0|json=0|verb=omniscrcpy.orbital.register|source=liris|boundary=public_handles_only",
+    "ORBITALENDPOINT|schema=ASOLARIA-OMNISCRPY-ORBITAL-LINK-V1|ts=2026-06-28T21:49:54Z|evidence_class=OPERATOR_OBSERVED_ACER|from=falcon|to=acer|host_pid8=4c7e27b6bfb76666|tuple_dim=60|levels=16|catalogs=HILBRA,HBI,ASOLARIA_ATLAS_RECALL,OMNISCRPY,VIS_SUPERVISORS,PID_ROSTER,ORBITAL_ENDPOINT,SHANNON_RECEIPT,GAC,AGENT_TEAMS|sha16=a28eedf7a7c5aa57|secret_material=0|pii=0|json=0|endpoint=http://192.168.1.6:8789|bind=0.0.0.0:8789|bus=http://192.168.1.9:4947/behcs/send|recall=http://192.168.1.9:4796|usb_required=0",
+    "HBIHOTPATH|schema=ASOLARIA-OMNISCRPY-ORBITAL-LINK-V1|ts=2026-06-28T21:49:54Z|evidence_class=OPERATOR_OBSERVED_ACER|from=falcon|to=acer|host_pid8=4c7e27b6bfb76666|tuple_dim=60|levels=16|catalogs=HILBRA,HBI,ASOLARIA_ATLAS_RECALL,OMNISCRPY,VIS_SUPERVISORS,PID_ROSTER,ORBITAL_ENDPOINT,SHANNON_RECEIPT,GAC,AGENT_TEAMS|sha16=a28eedf7a7c5aa57|secret_material=0|pii=0|json=0|contract=LINK_owner_pid_host_verb_nonce_ts_unix_s_be64|key_off_wire=1|access_levels=L0,L5,L9|transport=trusted_lan_until_tls_or_tunnel",
+    "VISPIDSUP|schema=ASOLARIA-OMNISCRPY-ORBITAL-LINK-V1|ts=2026-06-28T21:49:54Z|evidence_class=OPERATOR_OBSERVED_ACER|from=falcon|to=acer|host_pid8=4c7e27b6bfb76666|tuple_dim=60|levels=16|catalogs=HILBRA,HBI,ASOLARIA_ATLAS_RECALL,OMNISCRPY,VIS_SUPERVISORS,PID_ROSTER,ORBITAL_ENDPOINT,SHANNON_RECEIPT,GAC,AGENT_TEAMS|sha16=a28eedf7a7c5aa57|secret_material=0|pii=0|json=0|supervisor_pid=AGENT-PID-HB48C5E-A03-N07|endpoint_pid=AGENT-PID-H3B6634-A03-N08|attach_supervisor_pid=AGENT-PID-HA81A76-A02-N19|dashboard_ingest=1|raw_hbi_projection=1",
+    "MAPADD|schema=ASOLARIA-OMNISCRPY-ORBITAL-LINK-V1|ts=2026-06-28T21:49:54Z|evidence_class=OPERATOR_OBSERVED_ACER|from=falcon|to=acer|host_pid8=4c7e27b6bfb76666|tuple_dim=60|levels=16|catalogs=HILBRA,HBI,ASOLARIA_ATLAS_RECALL,OMNISCRPY,VIS_SUPERVISORS,PID_ROSTER,ORBITAL_ENDPOINT,SHANNON_RECEIPT,GAC,AGENT_TEAMS|sha16=a28eedf7a7c5aa57|secret_material=0|pii=0|json=0|target=asolaria-unified-fabric-map|node=falcon|node_role=orbital_mobile_endpoint|expandable_json=1|owner_private_default=1"
+  ],
+  "agent_rows": [
+    {
+      "id": "agent-falcon-omnicoder-orbital-endpoint-01",
+      "pid": "AGENT-PID-H3B6634-A03-N08",
+      "vantage": "falcon",
+      "role": "omnicoder-orbital-endpoint",
+      "tier": "T2",
+      "status": "active",
+      "registered_at": "2026-06-28T21:49:54Z",
+      "registered_by": "LIRIS-CODEX-ORBITAL-REGISTRAR",
+      "phase_assignments": [
+        5,
+        8
+      ],
+      "verify_envelope_pathRef": "tools/omniscrcpy/broadcasts/orbital/latest-falcon-orbital.hbp",
+      "evidence_class": "OPERATOR_OBSERVED_ACER",
+      "endpoint": "http://192.168.1.6:8789",
+      "bus": "http://192.168.1.9:4947/behcs/send",
+      "recall": "http://192.168.1.9:4796",
+      "host_pid8": "4c7e27b6bfb76666",
+      "tuple_dim": 60,
+      "catalogs_60d": [
+        "HILBRA",
+        "HBI",
+        "ASOLARIA_ATLAS_RECALL",
+        "OMNISCRPY",
+        "VIS_SUPERVISORS",
+        "PID_ROSTER",
+        "ORBITAL_ENDPOINT",
+        "SHANNON_RECEIPT",
+        "GAC",
+        "AGENT_TEAMS"
+      ]
+    },
+    {
+      "id": "agent-falcon-omniscrcpy-orbital-visual-supervisor-01",
+      "pid": "AGENT-PID-HB48C5E-A03-N07",
+      "vantage": "falcon",
+      "role": "OmniSCRPY-orbital-visual-supervisor",
+      "tier": "T2",
+      "status": "registered",
+      "registered_at": "2026-06-28T21:49:54Z",
+      "registered_by": "LIRIS-CODEX-ORBITAL-REGISTRAR",
+      "phase_assignments": [
+        5,
+        8
+      ],
+      "verify_envelope_pathRef": "tools/omniscrcpy/broadcasts/orbital/latest-falcon-orbital.hbp",
+      "evidence_class": "DESIGN_FROM_OPERATOR_OBSERVED_ACER",
+      "endpoint": "http://192.168.1.6:8789",
+      "tuple_dim": 60,
+      "catalogs_60d": [
+        "HILBRA",
+        "HBI",
+        "ASOLARIA_ATLAS_RECALL",
+        "OMNISCRPY",
+        "VIS_SUPERVISORS",
+        "PID_ROSTER",
+        "ORBITAL_ENDPOINT",
+        "SHANNON_RECEIPT",
+        "GAC",
+        "AGENT_TEAMS"
+      ]
+    },
+    {
+      "id": "agent-liris-falcon-orbital-attach-supervisor-01",
+      "pid": "AGENT-PID-HA81A76-A02-N19",
+      "vantage": "liris",
+      "role": "orbital-attach-supervisor",
+      "tier": "T2",
+      "status": "registered",
+      "registered_at": "2026-06-28T21:49:54Z",
+      "registered_by": "LIRIS-CODEX-ORBITAL-REGISTRAR",
+      "phase_assignments": [
+        5,
+        8
+      ],
+      "verify_envelope_pathRef": "tools/omniscrcpy/broadcasts/orbital/latest-falcon-orbital.hbp",
+      "evidence_class": "DESIGN_PENDING_LIRIS_ATTACH",
+      "target_vantage": "falcon",
+      "key_material_boundary": "public_handles_only",
+      "tuple_dim": 60,
+      "catalogs_60d": [
+        "HILBRA",
+        "HBI",
+        "ASOLARIA_ATLAS_RECALL",
+        "OMNISCRPY",
+        "VIS_SUPERVISORS",
+        "PID_ROSTER",
+        "ORBITAL_ENDPOINT",
+        "SHANNON_RECEIPT",
+        "GAC",
+        "AGENT_TEAMS"
+      ]
+    }
+  ]
+}
