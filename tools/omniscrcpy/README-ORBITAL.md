@@ -31,8 +31,14 @@ node tools/omniscrcpy/omniscrcpy-orbital-link.mjs
 The command writes:
 
 - `tools/omniscrcpy/broadcasts/orbital/latest-falcon-orbital.hbp`
-- `tools/omniscrcpy/broadcasts/orbital/latest-falcon-orbital.json`
-- timestamped `.hbp` and `.json` receipts
+- a timestamped `.hbp` receipt
+
+JSON mirrors are diagnostics only. If a cold validator needs one, make it
+explicit:
+
+```bash
+node tools/omniscrcpy/omniscrcpy-orbital-link.mjs --json-out
+```
 
 Use `--post` only when the target bus is intentionally reachable from the seat
 running the command:

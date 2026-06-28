@@ -211,14 +211,15 @@ if ((process.argv[1] || "").endsWith("omniscrcpy-orbital-link.mjs")) {
   const stamp = receipt.ts.replace(/[:.]/g, "-");
   const stem = `orbital-link-${receipt.from}-to-${receipt.to}-${stamp}`;
   const hbpPath = resolve(outDir, `${stem}.hbp`);
-  const jsonPath = resolve(outDir, `${stem}.json`);
   const latestHbp = resolve(outDir, "latest-falcon-orbital.hbp");
-  const latestJson = resolve(outDir, "latest-falcon-orbital.json");
   const hbp = `${receipt.rows.join("\n")}\n`;
   writeFileSync(hbpPath, hbp, "utf8");
-  writeFileSync(jsonPath, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
   writeFileSync(latestHbp, hbp, "utf8");
-  writeFileSync(latestJson, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+  let jsonPath = null;
+  if (flag("json-out")) {
+    jsonPath = resolve(outDir, `${stem}.json`);
+    writeFileSync(jsonPath, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+  }
 
   const post = await maybePost(receipt.bus, receipt);
   console.log(JSON.stringify({
@@ -227,7 +228,6 @@ if ((process.argv[1] || "").endsWith("omniscrcpy-orbital-link.mjs")) {
     hbpPath,
     jsonPath,
     latestHbp,
-    latestJson,
     sha16: receipt.link_sha16,
     rows: receipt.rows.length,
     agent_rows: receipt.agent_rows.length,
