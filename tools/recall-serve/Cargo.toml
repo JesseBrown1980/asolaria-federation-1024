@@ -1,0 +1,19 @@
+[package]
+name = "recall-serve"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# Rust HBI-backed recall search — the no-Node replacement for serve-recall.cjs.
+# The Node engine event-loop-stalls on the 591k/159MB corpus; this serves the
+# SAME .hbp/.hbi with O(1) byte-offset seeks on a thread-per-connection server.
+# Corpus is read-only and NEVER published; the engine is.
+
+[[bin]]
+name = "recall-serve"
+path = "src/main.rs"
+
+[dependencies]
+sha2.workspace = true

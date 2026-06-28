@@ -38,6 +38,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "asolaria-server-council-serve"
+version = "0.1.0"
+dependencies = [
+ "asolaria-server-vote-quorum",
+]
+
+[[package]]
+name = "asolaria-server-dashboard-serve"
+version = "0.1.0"
+
+[[package]]
+name = "asolaria-server-fischer-eval"
+version = "0.1.0"
+
+[[package]]
 name = "asolaria-server-gnn-oracle"
 version = "0.1.0"
 
@@ -52,6 +67,13 @@ dependencies = [
 [[package]]
 name = "asolaria-server-tier-policy"
 version = "0.1.0"
+
+[[package]]
+name = "asolaria-server-vote-quorum"
+version = "0.1.0"
+dependencies = [
+ "sha2",
+]
 
 [[package]]
 name = "block-buffer"
@@ -203,6 +225,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924"
 dependencies = [
  "proc-macro2",
+]
+
+[[package]]
+name = "recall-serve"
+version = "0.1.0"
+dependencies = [
+ "sha2",
 ]
 
 [[package]]
