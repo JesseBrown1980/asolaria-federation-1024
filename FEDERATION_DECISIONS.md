@@ -104,3 +104,30 @@ This file records canon decisions reached by operator + cosigners. Append-only. 
 - **Decided-by:** <agent or operator>
 - **Cosign:** chain row <n>
 ```
+
+---
+
+## 2026-05-19 — Wave 1→4 modernization audit + fix-wave landed
+
+- **Audit chain:** 19 explorers + 18 synthesizers + 18 cross-reviewers + 4 architect-spindle = **59 distinct agent invocations** + 19 substrate-inventory subs + 5 fix-agents + 18 dispatch-wave agents
+- **Hermes architect correction received:** USB is **HyperBEHCS continuity substrate, NOT a drive**. Append-only. Read-only inventory only. No filesystem-style writes. Every USB touch is bus-envelope.
+- **Wave-4 verdict:** **GO WITH CONDITIONS** — 8 LAND-AS-IS, 6 LAND-WITH-AMEND, 4 HOLD/REJECT (per architect-spindle synthesis)
+- **Operator gates declared:**
+  - USB **+96GB delta** ceiling (inventory-budget against 2TB continuity substrate)
+  - Quintuple-auth window **2026-05-25 ceiling** (within existing FD-008 broad-auth-window 2026-05-12 → 2026-05-26)
+  - **Wave-5 execution auth** held pending operator ratification of Wave-4 conditions
+  - **cp 260 reallocation** authorized (OP-JESSE root authority anchor; see `project_nested_fractal_spindles_three_agent_classes_canon.md`)
+- **Chain-head row:** `seq=190 asolariaModernizationList190 ASOLARIA-MODERNIZATION-LIST-PID-2026-05-19` (`describe_only=true`)
+- **Fix-wave landed:**
+  - `dispatch.sink` exported (plane boundary now addressable)
+  - `gc.mjs` `hardRelease` path live (room slots reclaim deterministically)
+  - port-pool `_innerHilbert` → `_innerFNV` rename (clarity: it was always FNV, never Hilbert)
+  - `fireHookwall` → `indexPid` wire connected (three-keys triad closure per FD-010)
+  - **All 17/17 plane selfTests GREEN**
+- **Discovered collisions (resolved):**
+  - cp **272/273 occupied** by gaia-emergent (no-op; left in place)
+  - **seq=190 contested** CS5 ↔ CS7 — resolved: **CS7 first** (timestamp precedence)
+  - cp **192 APOLLO/HERMES** — resolved: **APOLLO first** (catalog-order precedence)
+- **Append-only enforced. No USB writes.** All artifacts landed acer-side filesystem; USB read-only inventory only.
+- **Decided-by:** AGT-C3-HESTIA-EXTEND-DECISIONS-PID-2026-05-19 under EIRENE + BOREAS amend-directive (extend existing file, do not mint TRACKING.md sibling)
+- **Cosign:** chain row 190 (pending propagation to liris)

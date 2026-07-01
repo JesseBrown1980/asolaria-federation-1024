@@ -6,7 +6,7 @@
 //! Every hookwall verdict + every tier-2+ envelope dispatch appends a row.
 //!
 //! Wire format (ndjson, one row per line):
-//! ```
+//! ```text
 //! {"row":N, "ts_ns":U64, "prev_sha16":HEX16, "kind":STR, "payload_sha16":HEX16, "sig":HEX128}
 //! ```
 //!
