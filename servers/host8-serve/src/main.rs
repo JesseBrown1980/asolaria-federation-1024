@@ -26,6 +26,8 @@ use asolaria_server_agent_runtime::rooms::{
 use asolaria_server_agent_runtime::runners::{runner_for_role, RunnerKind};
 use asolaria_server_agent_runtime::AgentRole;
 
+mod replay_prep;
+
 const DEFAULT_BIND: &str = "127.0.0.1:5088";
 const DEFAULT_ROOM_ID: &str = "gnn-dispatch-bridge";
 const DEFAULT_ROOM_STUB: &str = "rooms/task-manager/bridge/gnn-dispatch-bridge";
@@ -121,7 +123,10 @@ fn main() {
     // separate per-layer DispatchCounters surfaced in HOST8LIBS. E=0: registration/counting only.
     let mut registry = AgentRegistry::new();
     if config.once {
-        print!("{}", render_feed(&room, &config, &book, started, &mut gnn, &registry));
+        print!(
+            "{}",
+            render_feed(&room, &config, &book, started, &mut gnn, &registry)
+        );
         return;
     }
 
@@ -153,9 +158,15 @@ fn main() {
 
     for stream in listener.incoming() {
         match stream {
-            Ok(stream) => {
-                handle_client(stream, &room, &config, &book, started, &mut gnn, &mut registry)
-            }
+            Ok(stream) => handle_client(
+                stream,
+                &room,
+                &config,
+                &book,
+                started,
+                &mut gnn,
+                &mut registry,
+            ),
             Err(error) => eprintln!("HOST8ERR|accept={}|json=0", hbp_escape(error.to_string())),
         }
     }
@@ -199,8 +210,7 @@ where
             .unwrap_or_else(|_| DEFAULT_VERB_CATALOG.to_string()),
         summon_root: env::var("GAIA_SUMMON_ROOT")
             .unwrap_or_else(|_| DEFAULT_SUMMON_ROOT.to_string()),
-        summon_model: env::var("SUMMON_MODEL")
-            .unwrap_or_else(|_| DEFAULT_SUMMON_MODEL.to_string()),
+        summon_model: env::var("SUMMON_MODEL").unwrap_or_else(|_| DEFAULT_SUMMON_MODEL.to_string()),
         opencode_js_bin: env::var("OPENCODE_JS_BIN")
             .unwrap_or_else(|_| DEFAULT_OPENCODE_JS_BIN.to_string()),
     };
@@ -281,11 +291,13 @@ fn load_room_stub(path: &str) -> Option<Room> {
     Some(Room {
         id,
         room_stub,
-        target_runtime: hbp_field(&body, "target_runtime").unwrap_or_else(|| "8byte-rust-host".to_string()),
+        target_runtime: hbp_field(&body, "target_runtime")
+            .unwrap_or_else(|| "8byte-rust-host".to_string()),
         legacy_runtime: hbp_field(&body, "legacy_runtime").unwrap_or_else(|| "node".to_string()),
         legacy_path: hbp_field(&body, "legacy_path").unwrap_or_default(),
         lane: hbp_field(&body, "lane").unwrap_or_else(|| "retire-or-host8".to_string()),
-        swap_gate: hbp_field(&body, "swap_gate").unwrap_or_else(|| "parity-before-retire".to_string()),
+        swap_gate: hbp_field(&body, "swap_gate")
+            .unwrap_or_else(|| "parity-before-retire".to_string()),
         host_handle8,
     })
 }
@@ -354,9 +366,8 @@ fn seat_from_row(line: &str, source: &str) -> Option<Seat> {
     // The human name is field index 1 (right after the row tag) for the combined
     // shapes (FORMULA|<name>|..., CHIEF|<name>|..., SOS|<name>|..., PROF|<name>|...).
     // For the feed REG rows the name lives in `name=<n>`.
-    let name = row_value(line, "name").unwrap_or_else(|| {
-        line.split('|').nth(1).unwrap_or("").trim().to_string()
-    });
+    let name = row_value(line, "name")
+        .unwrap_or_else(|| line.split('|').nth(1).unwrap_or("").trim().to_string());
     Some(Seat {
         name,
         handle8,
@@ -392,12 +403,7 @@ fn seat_from_per_seat_file(body: &str, source: &str) -> Option<Seat> {
             "NAME" => name = rest.trim().to_string(),
             // PID|<handle>|birth=... — handle is the first sub-field.
             "PID" => {
-                handle8 = rest
-                    .split('|')
-                    .next()
-                    .unwrap_or("")
-                    .trim()
-                    .to_lowercase();
+                handle8 = rest.split('|').next().unwrap_or("").trim().to_lowercase();
             }
             "HILBERT" => hilbert = rest.split('|').next().unwrap_or("").trim().to_string(),
             "LAYER" => layer = rest.split('|').next().unwrap_or("").trim().to_string(),
@@ -442,9 +448,11 @@ fn load_seats(office_dir: &str, feed_dir: &str) -> SeatBook {
                 p.extension().map(|x| x == "hbp").unwrap_or(false)
                     && p.file_name()
                         .and_then(|n| n.to_str())
-                        .map(|n| n.starts_with("sup-")
-                            || n.starts_with("agent-")
-                            || n.contains("FORMULA-CORPUS"))
+                        .map(|n| {
+                            n.starts_with("sup-")
+                                || n.starts_with("agent-")
+                                || n.contains("FORMULA-CORPUS")
+                        })
                         .unwrap_or(false)
             })
             .collect();
@@ -611,7 +619,12 @@ fn load_verb_catalog(path: &str) -> Vec<String> {
 ///   noun  = seat name
 ///   glyph = sha16("glyph|"+noun+"|"+cube_bh)
 ///   sha   = handle8
-fn tuple60d(name: &str, handle8: &str, cube_bh: &str, verb_catalog: &[String]) -> (String, String, String, String) {
+fn tuple60d(
+    name: &str,
+    handle8: &str,
+    cube_bh: &str,
+    verb_catalog: &[String],
+) -> (String, String, String, String) {
     let noun = name.to_string();
     let verb = if verb_catalog.is_empty() {
         "report".to_string()
@@ -696,7 +709,13 @@ fn load_observed_frame(path: &str) -> Option<ObservedFrame> {
         .and_then(|v| parse_u64_field(&v))
         .or_else(|| hbp_field(line, "pid").map(|pid| fnv1a64(&pid)))
         .unwrap_or(0);
-    Some(ObservedFrame { tick, phash, frame_delta, entropy_q, pid_fingerprint })
+    Some(ObservedFrame {
+        tick,
+        phash,
+        frame_delta,
+        entropy_q,
+        pid_fingerprint,
+    })
 }
 
 fn render_feed(
@@ -726,7 +745,10 @@ fn render_feed(
     let public_to_secret = check_transit(AccessTier::Public, AccessTier::Secret)
         .map(|verdict| verdict.authorized)
         .unwrap_or(false);
-    let room_stub_source = config.room_stub_path.as_deref().unwrap_or("default-embedded");
+    let room_stub_source = config
+        .room_stub_path
+        .as_deref()
+        .unwrap_or("default-embedded");
 
     [
         format!(
@@ -802,6 +824,8 @@ fn render_feed(
         "HOST8ROUTE|path=/v1/envelope.hbp?caller=&target=&verb=&payload=&cube=&glyph=&cosign=&ttl=&ant=&row=[&ts=]|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/launch-plan.hbp?h=<handle8>&device=<d>&ts=<unix>&role=<hermes|sub>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/summon-batch.hbp?count=<N>&role=<hermes|sub>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
+        "HOST8ROUTE|path=/shadow-parity.hbp?count=<N>&device=<d>&role=<hermes|sub>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
+        "HOST8ROUTE|path=/replay-prep.hbp?target=<N>&sample=<N>&batch=<N>&device=<d>&score=<q>&risk=<q>&registry=<dir>&chunk_limit=<N>|method=GET|format=HBP|json=0".to_string(),
     ]
     .join("\n")
         + "\n"
@@ -860,7 +884,10 @@ fn render_count(book: &SeatBook) -> String {
 }
 
 fn render_not_found(path: &str) -> String {
-    format!("HOST8ERR|status=404|path={}|reason=not_found|json=0\n", hbp_escape(path))
+    format!(
+        "HOST8ERR|status=404|path={}|reason=not_found|json=0\n",
+        hbp_escape(path)
+    )
 }
 
 /// Fire the PROVEN $0 opencode path for ONE summon: a unique room dir = fresh
@@ -965,7 +992,11 @@ fn render_summon(book: &SeatBook, config: &Config, query: &str) -> (bool, String
     let handle = query_param(query, "h").unwrap_or_default().to_lowercase();
     let device = {
         let d = query_param(query, "device").unwrap_or_default();
-        if d.is_empty() { "acer".to_string() } else { d }
+        if d.is_empty() {
+            "acer".to_string()
+        } else {
+            d
+        }
     };
     // ts: explicit &ts= wins (lets parity be reproduced), else server unix seconds.
     let ts = query_param(query, "ts")
@@ -986,9 +1017,9 @@ fn render_summon(book: &SeatBook, config: &Config, query: &str) -> (bool, String
         }
     };
 
-    let (verb, noun, glyph, sha) =
-        tuple60d(&seat.name, &seat.handle8, &seat.cube_bh, &book.verbs);
-    let instance_pid = resolve_instance_pid(&seat.handle8, &device, &ts, &verb, &noun, &glyph, &sha);
+    let (verb, noun, glyph, sha) = tuple60d(&seat.name, &seat.handle8, &seat.cube_bh, &book.verbs);
+    let instance_pid =
+        resolve_instance_pid(&seat.handle8, &device, &ts, &verb, &noun, &glyph, &sha);
 
     // fire path: unique dir keyed by instance_pid (fresh session = $0). OFF by default.
     let (fired, cost, exit, response) = if fire {
@@ -1129,7 +1160,12 @@ fn seal_hex(row: &[u8; 16]) -> String {
 ///   -> spawn-gate ring verdict (kernel spawn_gate::spawn_gate_verdict, BLOCK>HOLD>PROCEED) -> sealed
 /// HBP receipt. It NEVER fires: `process_launch=0` ALWAYS. It only reports whether a fire WOULD be
 /// permitted (`fire_allowed=1` iff the gate PROCEEDs). The actual gated fire stays in the summon path.
-fn render_launch_plan(book: &SeatBook, _config: &Config, gnn_score_q: u32, query: &str) -> (bool, String) {
+fn render_launch_plan(
+    book: &SeatBook,
+    _config: &Config,
+    gnn_score_q: u32,
+    query: &str,
+) -> (bool, String) {
     let handle = query_param(query, "h").unwrap_or_default().to_lowercase();
     let device = {
         let d = query_param(query, "device").unwrap_or_default();
@@ -1157,7 +1193,8 @@ fn render_launch_plan(book: &SeatBook, _config: &Config, gnn_score_q: u32, query
     };
 
     let (verb, noun, glyph, sha) = tuple60d(&seat.name, &seat.handle8, &seat.cube_bh, &book.verbs);
-    let instance_pid = resolve_instance_pid(&seat.handle8, &device, &ts, &verb, &noun, &glyph, &sha);
+    let instance_pid =
+        resolve_instance_pid(&seat.handle8, &device, &ts, &verb, &noun, &glyph, &sha);
 
     // 1. C/D room routing (rooms.rs): agent rooms rotate on C: (rename-before-load = $0).
     let room_id = room_id_from_pid(&instance_pid);
@@ -1234,7 +1271,8 @@ fn render_summon_batch(book: &SeatBook, config: &Config, gnn_score_q: u32, query
     let n = requested.min(MAX_BATCH).min(book.seats.len());
 
     let mut lines = String::new();
-    let (mut proceed, mut hold, mut block, mut c_rooms, mut d_rooms) = (0usize, 0usize, 0usize, 0usize, 0usize);
+    let (mut proceed, mut hold, mut block, mut c_rooms, mut d_rooms) =
+        (0usize, 0usize, 0usize, 0usize, 0usize);
     for seat in book.seats.iter().take(n) {
         let sub_query = format!(
             "h={}&role={}&score={}&risk={}",
@@ -1270,6 +1308,87 @@ fn render_summon_batch(book: &SeatBook, config: &Config, gnn_score_q: u32, query
     out
 }
 
+/// `/shadow-parity.hbp?count=N&device=&role=&score=&risk=` — #25: replay the resolve-only
+/// `/summon.hbp` path beside the dry `/launch-plan.hbp` path and prove they agree on identity
+/// (`instance_pid`) while both keep `process_launch=0`. This is the replay surface for #26:
+/// shadow proof first, then 100B replay prep, then any controlled fire request. It NEVER passes
+/// `fire=1` to summon and never launches a process.
+fn render_shadow_parity(book: &SeatBook, config: &Config, gnn_score_q: u32, query: &str) -> String {
+    const MAX_SHADOW: usize = 1000;
+    let requested = query_param(query, "count")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(1);
+    let n = requested.min(MAX_SHADOW).min(book.seats.len());
+    let device = query_param(query, "device").unwrap_or_else(|| "acer".to_string());
+    let ts = query_param(query, "ts")
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| unix_seconds().to_string());
+    let role = query_param(query, "role").unwrap_or_default();
+    let score = query_param(query, "score").unwrap_or_default();
+    let risk = query_param(query, "risk").unwrap_or_default();
+
+    let mut rows = String::new();
+    let mut matched = 0usize;
+    let mut mismatched = 0usize;
+    let mut proceed = 0usize;
+    let mut hold = 0usize;
+    let mut block = 0usize;
+
+    for seat in book.seats.iter().take(n) {
+        let summon_query = format!("h={}&device={}&ts={}", seat.handle8, device, ts);
+        let plan_query = format!(
+            "h={}&device={}&ts={}&role={}&score={}&risk={}",
+            seat.handle8, device, ts, role, score, risk
+        );
+
+        let (summon_ok, summon_line) = render_summon(book, config, &summon_query);
+        let (plan_ok, plan_line) = render_launch_plan(book, config, gnn_score_q, &plan_query);
+        let summon_pid = hbp_field(&summon_line, "instance_pid").unwrap_or_default();
+        let plan_pid = hbp_field(&plan_line, "instance_pid").unwrap_or_default();
+        let summon_fired = hbp_field(&summon_line, "fired").unwrap_or_default();
+        let plan_launch = hbp_field(&plan_line, "process_launch").unwrap_or_default();
+        let gate = hbp_field(&plan_line, "gate_verdict").unwrap_or_else(|| "BLOCK".to_string());
+
+        match gate.as_str() {
+            "PROCEED" => proceed += 1,
+            "HOLD" => hold += 1,
+            _ => block += 1,
+        }
+
+        let parity_ok = summon_ok
+            && plan_ok
+            && !summon_pid.is_empty()
+            && summon_pid == plan_pid
+            && summon_fired == "0"
+            && plan_launch == "0";
+        if parity_ok {
+            matched += 1;
+        } else {
+            mismatched += 1;
+        }
+
+        rows.push_str(&format!(
+            "HOST8SHADOWROW|handle8={}|summon_ok={}|plan_ok={}|summon_pid={}|plan_pid={}|gate_verdict={}|summon_fired={}|process_launch={}|parity={}|json=0\n",
+            hbp_escape(&seat.handle8),
+            if summon_ok { 1 } else { 0 },
+            if plan_ok { 1 } else { 0 },
+            hbp_escape(&summon_pid),
+            hbp_escape(&plan_pid),
+            hbp_escape(&gate),
+            hbp_escape(&summon_fired),
+            hbp_escape(&plan_launch),
+            if parity_ok { "OK" } else { "MISMATCH" },
+        ));
+    }
+
+    let mut out = format!(
+        "HOST8SHADOW|requested={}|checked={}|matched={}|mismatched={}|proceed={}|hold={}|block={}|process_launch=0|fire_param=absent|json=0\n",
+        requested, n, matched, mismatched, proceed, hold, block
+    );
+    out.push_str(&rows);
+    out
+}
+
 fn handle_client(
     mut stream: TcpStream,
     room: &Room,
@@ -1292,9 +1411,10 @@ fn handle_client(
         None => (target, ""),
     };
     let (status, body) = match path {
-        "/" | "/health.hbp" | "/room.hbp" | "/feed.hbp" => {
-            ("200 OK", render_feed(room, config, book, started, gnn, registry))
-        }
+        "/" | "/health.hbp" | "/room.hbp" | "/feed.hbp" => (
+            "200 OK",
+            render_feed(room, config, book, started, gnn, registry),
+        ),
         "/seats.hbp" => ("200 OK", render_seats(book)),
         "/count.hbp" => ("200 OK", render_count(book)),
         "/summon.hbp" => {
@@ -1310,7 +1430,24 @@ fn handle_client(
         }
         "/summon-batch.hbp" => {
             let gnn_score_q = gnn.preview_latest_score_q().unwrap_or(0);
-            ("200 OK", render_summon_batch(book, config, gnn_score_q, query))
+            (
+                "200 OK",
+                render_summon_batch(book, config, gnn_score_q, query),
+            )
+        }
+        "/shadow-parity.hbp" => {
+            let gnn_score_q = gnn.preview_latest_score_q().unwrap_or(0);
+            (
+                "200 OK",
+                render_shadow_parity(book, config, gnn_score_q, query),
+            )
+        }
+        "/replay-prep.hbp" => {
+            let gnn_score_q = gnn.preview_latest_score_q().unwrap_or(0);
+            (
+                "200 OK",
+                replay_prep::render_replay_prep(book, config, gnn_score_q, query),
+            )
         }
         "/seat.hbp" => {
             let handle = query_param(query, "h").unwrap_or_default();
@@ -1346,6 +1483,7 @@ fn handle_client(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::replay_prep::render_replay_prep;
 
     #[test]
     fn canonicalization_matches_tmhost_v1_1() {
@@ -1354,7 +1492,8 @@ mod tests {
 
     #[test]
     fn host_handle8_is_eight_bytes_hex() {
-        let handle = host_handle8("gnn-dispatch-bridge|rooms/task-manager/bridge/gnn-dispatch-bridge");
+        let handle =
+            host_handle8("gnn-dispatch-bridge|rooms/task-manager/bridge/gnn-dispatch-bridge");
         assert_eq!(handle.len(), 16);
         assert!(handle.chars().all(|ch| ch.is_ascii_hexdigit()));
     }
@@ -1381,7 +1520,14 @@ mod tests {
             opencode_js_bin: DEFAULT_OPENCODE_JS_BIN.to_string(),
         };
         let mut gnn = GnnInference::new();
-        let feed = render_feed(&default_room(), &config, &SeatBook::default(), Instant::now(), &mut gnn, &AgentRegistry::new());
+        let feed = render_feed(
+            &default_room(),
+            &config,
+            &SeatBook::default(),
+            Instant::now(),
+            &mut gnn,
+            &AgentRegistry::new(),
+        );
         assert!(feed.contains("HOST8HDR|"));
         assert!(feed.contains("json=0"));
         assert!(!feed.contains('{'));
@@ -1543,14 +1689,24 @@ mod tests {
             );
             return;
         }
-        let (verb, noun, glyph, sha) =
-            tuple60d(NODE_NAME, NODE_HANDLE8, NODE_CUBE_BH, &verbs);
+        let (verb, noun, glyph, sha) = tuple60d(NODE_NAME, NODE_HANDLE8, NODE_CUBE_BH, &verbs);
         assert_eq!(verb, NODE_VERB, "verb selection must match node");
         assert_eq!(noun, NODE_NAME);
         assert_eq!(glyph, NODE_GLYPH);
         assert_eq!(sha, NODE_HANDLE8);
-        let pid = resolve_instance_pid(NODE_HANDLE8, NODE_DEVICE, NODE_TS, &verb, &noun, &glyph, &sha);
-        assert_eq!(pid, NODE_INSTANCE_PID, "full-chain instance_pid must match node");
+        let pid = resolve_instance_pid(
+            NODE_HANDLE8,
+            NODE_DEVICE,
+            NODE_TS,
+            &verb,
+            &noun,
+            &glyph,
+            &sha,
+        );
+        assert_eq!(
+            pid, NODE_INSTANCE_PID,
+            "full-chain instance_pid must match node"
+        );
     }
 
     #[test]
@@ -1579,7 +1735,11 @@ mod tests {
             summon_model: DEFAULT_SUMMON_MODEL.to_string(),
             opencode_js_bin: DEFAULT_OPENCODE_JS_BIN.to_string(),
         };
-        let (ok, body) = render_summon(&book, &config, "h=0155964ffc8ef1f8&device=acer&ts=1750000000");
+        let (ok, body) = render_summon(
+            &book,
+            &config,
+            "h=0155964ffc8ef1f8&device=acer&ts=1750000000",
+        );
         assert!(ok);
         assert!(body.contains(&format!("instance_pid={}", NODE_INSTANCE_PID)));
         assert!(body.contains("fired=0"));
@@ -1625,8 +1785,12 @@ mod tests {
     fn launch_plan_composes_room_runner_gate_without_firing() {
         let (book, config) = launch_plan_test_fixture();
         // No GNN score (0) => gate HOLDs (genius not cleared) => fire_allowed=0. NEVER launches.
-        let (ok, body) =
-            render_launch_plan(&book, &config, 0, "h=0155964ffc8ef1f8&device=acer&ts=1750000000");
+        let (ok, body) = render_launch_plan(
+            &book,
+            &config,
+            0,
+            "h=0155964ffc8ef1f8&device=acer&ts=1750000000",
+        );
         assert!(ok);
         assert!(body.contains(&format!("instance_pid={}", NODE_INSTANCE_PID)));
         assert!(body.contains("room_id="));
@@ -1705,5 +1869,90 @@ mod tests {
         assert!(held.contains("hold=2"));
         assert!(held.contains("proceed=0"));
         assert!(held.contains("process_launch=0"));
+    }
+
+    #[test]
+    fn shadow_parity_compares_summon_resolve_to_launch_plan_without_fire() {
+        let (book, config) = launch_plan_test_fixture();
+        let out = render_shadow_parity(
+            &book,
+            &config,
+            0,
+            "count=1&device=acer&ts=1750000000&score=800&risk=10",
+        );
+        assert!(out.contains("HOST8SHADOW|requested=1|checked=1|matched=1|mismatched=0"));
+        assert!(out.contains("HOST8SHADOWROW|handle8=0155964ffc8ef1f8"));
+        assert!(out.contains(&format!("summon_pid={}", NODE_INSTANCE_PID)));
+        assert!(out.contains(&format!("plan_pid={}", NODE_INSTANCE_PID)));
+        assert!(out.contains("gate_verdict=PROCEED"));
+        assert!(out.contains("summon_fired=0"));
+        assert!(out.contains("process_launch=0"));
+        assert!(out.contains("fire_param=absent"));
+        assert!(out.contains("parity=OK"));
+        assert!(out.contains("json=0"));
+        assert!(!out.contains('{'));
+        assert!(!out.contains('}'));
+    }
+
+    #[test]
+    fn shadow_parity_batch_holds_without_genius_score() {
+        let (mut book, config) = launch_plan_test_fixture();
+        book.seats.push(Seat {
+            name: "AGT-C4".to_string(),
+            handle8: "f679158eb8ca4531".to_string(),
+            cube_bh: "BH.4.0.100".to_string(),
+            hilbert: "930".to_string(),
+            class: "hyperbehcs_supervisor_entity".to_string(),
+            layer: "supervisor".to_string(),
+            source: "test".to_string(),
+        });
+        let out = render_shadow_parity(&book, &config, 0, "count=2&device=acer&ts=1750000000");
+        assert!(out.contains("checked=2"));
+        assert!(out.contains("matched=2"));
+        assert!(out.contains("mismatched=0"));
+        assert!(out.contains("hold=2"));
+        assert_eq!(out.matches("HOST8SHADOWROW|").count(), 2);
+        assert!(out.contains("process_launch=0"));
+        assert!(!out.contains("fire=1"));
+    }
+
+    #[test]
+    fn replay_prep_estimates_100b_batches_but_keeps_fire_gated() {
+        let (book, config) = launch_plan_test_fixture();
+        let out = render_replay_prep(
+            &book,
+            &config,
+            0,
+            "target=100000000000&batch=10000&sample=1&device=acer&ts=1750000000&score=800&risk=10",
+        );
+        assert!(out.contains("HOST8REPLAYPREP|"));
+        assert!(out.contains("target_total=100000000000"));
+        assert!(out.contains("batch_size=10000"));
+        assert!(out.contains("estimated_batches=10000000"));
+        assert!(out.contains("sample_requested=1"));
+        assert!(out.contains("sample_checked=1"));
+        assert!(out.contains("sample_matched=1"));
+        assert!(out.contains("sample_mismatched=0"));
+        assert!(out.contains("status=READY_FOR_PACKET_REGISTRY_REPLAY"));
+        assert!(out.contains("HOST8REGISTRY|loaded=0"));
+        assert!(out.contains("registry_status=NOT_REQUESTED"));
+        assert!(out.contains("shadow_only=1"));
+        assert!(out.contains("process_launch=0"));
+        assert!(out.contains("auto_fire_allowed=0"));
+        assert!(out.contains("operator_t0_required=1"));
+        assert!(out.contains("json=0"));
+        assert!(!out.contains('{'));
+        assert!(!out.contains('}'));
+    }
+
+    #[test]
+    fn replay_prep_blocks_empty_sample() {
+        let book = SeatBook::default();
+        let (_, config) = launch_plan_test_fixture();
+        let out = render_replay_prep(&book, &config, 0, "target=100&batch=10&sample=5");
+        assert!(out.contains("sample_checked=0"));
+        assert!(out.contains("status=BLOCKED_NO_SEATS"));
+        assert!(out.contains("auto_fire_allowed=0"));
+        assert!(out.contains("process_launch=0"));
     }
 }

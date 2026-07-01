@@ -75,6 +75,16 @@ This file records canon decisions reached by operator + cosigners. Append-only. 
 - **Choice:** hookwall + PID-everything + GNN-pipes = self-automation; E01-gnn-dispatch-bridge.mjs is the closed-loop trigger (BUILT, fired 2353+ times)
 - **Rationale:** "the keys are hookwall into everything, PID everything on the hookwall and Gnn pipes, and then it automates itself"
 
+## FD-011 · USB-free orbital endpoint registration for OmniSCRPY
+
+- **Decided:** 2026-06-28T21:49:54Z
+- **Choice:** Falcon-style mobile endpoints join the visual/control fabric by calling the LAN fabric bus and exposing a Shannon-clean omnicoder endpoint over trusted LAN; USB is allowed as a one-time attach/attack transport but must not be a runtime dependency.
+- **Evidence:** `OPERATOR_OBSERVED_ACER` reports Falcon at `http://192.168.1.6:8789`, omnicoder `0.2.4-shannon-hardened`, host PID8 `4c7e27b6bfb76666`, bus heartbeats accepted at Acer `:4947`, and `usb_required=0` after launch.
+- **Implementation:** `tools/omniscrcpy/omniscrcpy-orbital-link.mjs` emits `ORBITALREG`, `ORBITALENDPOINT`, `HBIHOTPATH`, `VISPIDSUP`, and `MAPADD` rows for dashboards, PID supervisors, Hilbra/recall, and the unified fabric map.
+- **Boundary:** public handles only; private keys, vault paths, owner-private recall content, and device serials stay in the owning backend/vault.
+- **Decided-by:** operator directive plus LIRIS-CODEX orbital registrar implementation.
+- **Cosign:** pending backend/cosign-chain row; this public slice is a receipt and registration shape, not a secret-key approval.
+
 ---
 
 ## Pending decisions
