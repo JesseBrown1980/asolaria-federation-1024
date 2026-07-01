@@ -10,5 +10,11 @@ description = "Asolaria userspace server · vote-quorum Rust port (QUORUM_RULES 
 [lib]
 crate-type = ["rlib"]
 
+# Std parity harness (READ-ONLY): proves the no_std lib + canon reproduce the live py :4952
+# daemon's on-disk ledgers before any cutover. Does not touch the daemon or write any ledger.
+[[bin]]
+name = "vote-quorum-parity"
+path = "src/bin/vote-quorum-parity.rs"
+
 [dependencies]
 sha2 = { workspace = true }
