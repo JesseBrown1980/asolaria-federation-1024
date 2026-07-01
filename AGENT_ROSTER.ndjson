@@ -70,3 +70,17 @@
 {"id":"agent-this-session-sub-agent-16","pid":"AGENT-PID-H373AB5-A05-N16","vantage":"this-session","role":"sub-agent","tier":"T3","status":"registered","registered_at":"2026-05-11T16:45:00Z","registered_by":"ACER-CODEX-FRONTEND-VISUAL-OPERATOR","phase_assignments":[1,2,3,4,5,6,7,8,9,10],"verify_envelope_pathRef":null}
 {"id":"agent-this-session-sub-agent-17","pid":"AGENT-PID-H373922-A05-N17","vantage":"this-session","role":"sub-agent","tier":"T3","status":"registered","registered_at":"2026-05-11T16:45:00Z","registered_by":"ACER-CODEX-FRONTEND-VISUAL-OPERATOR","phase_assignments":[1,2,3,4,5,6,7,8,9,10],"verify_envelope_pathRef":null}
 {"id":"agent-this-session-sub-agent-18","pid":"AGENT-PID-H373DDB-A05-N18","vantage":"this-session","role":"sub-agent","tier":"T3","status":"registered","registered_at":"2026-05-11T16:45:00Z","registered_by":"ACER-CODEX-FRONTEND-VISUAL-OPERATOR","phase_assignments":[1,2,3,4,5,6,7,8,9,10],"verify_envelope_pathRef":null}
+{"row":73,"ts":"2026-05-17T19:49:52Z","kind":"OP_CLASS_SPECIAL","name":"JESSE","pid":"OP-JESSE-PID-G0000-A00-W000-P00-N00000","authority":"FABRIC_APEX","cosign_role":"primary","canon":"C:/AsolariaMetal/68_DEEP_WAVE_SECOND_CASCADE/rework/OP-CLASS-canon.hbp"}
+{"row":74,"ts":"2026-05-17T19:49:52Z","kind":"OP_CLASS_SPECIAL","name":"RAYSSA","pid":"OP-RAYSSA-PID-G0000-A00-W000-P00-N00000","authority":"FABRIC_APEX","cosign_role":"primary","primary_fabric":"liris"}
+{"row":75,"ts":"2026-05-17T19:49:52Z","kind":"ARCHITECT_CLASS","name":"BIG-PICKLE","authority":"GRID_OVERSEER","canon":"C:/AsolariaMetal/69_BIGPICKLE_10K_FOLDER_PRISM/BP-1-master-canon.hbp"}
+{"row":76,"ts":"2026-05-17T19:49:52Z","kind":"PROF_CLASS","name":"PROF-CONVERGE-001","role":"verdict_aggregator","canon":"C:/AsolariaMetal/68_DEEP_WAVE_SECOND_CASCADE/rework/SP-REWORK-supervisor-prof-canon.hbp"}
+{"row":77,"ts":"2026-05-17T19:49:52Z","kind":"PROF_CLASS","name":"PROF-PATH-A-001","role":"no_retry_absorber"}
+{"row":78,"ts":"2026-05-17T19:49:52Z","kind":"PROF_CLASS","name":"PROF-AUTOCHRONE-001","role":"self_reflection_cycle_enforcer"}
+{"row":79,"ts":"2026-05-17T19:49:52Z","kind":"DOMAIN_ANCHOR","domain":"viz_render","supervisor_pid":"SUP-VIZ-RENDER-001"}
+{"row":80,"ts":"2026-05-17T19:49:52Z","kind":"DOMAIN_ANCHOR","domain":"memory","supervisor_pid":"SUP-MEMORY-001"}
+{"row":81,"ts":"2026-05-17","kind":"COUNCIL_SUPERVISOR_RESERVE","domain":"shannon_layer","pid":"SUP-SHANNON-LAYER-010","status":"minted","witness":"special_op_jesse_within_window","canon":"C:/AsolariaMetal/68_DEEP_WAVE_SECOND_CASCADE/rework/RESERVE-SUP-canon.hbp"}
+{"row":82,"ts":"2026-05-17","kind":"COUNCIL_SUPERVISOR_RESERVE","domain":"hookwall","pid":"SUP-HOOK-010","status":"minted","witness":"special_op_jesse_within_window"}
+{"row":83,"ts":"2026-05-17","kind":"COUNCIL_SUPERVISOR_RESERVE","domain":"gnn_inference","pid":"SUP-GNN-010","status":"minted","witness":"special_op_jesse_within_window"}
+{"row":84,"ts":"2026-05-17","kind":"COUNCIL_SUPERVISOR_RESERVE","domain":"binding_class","pid":"SUP-BIND-010","status":"minted","witness":"special_op_jesse_within_window"}
+{"row":85,"ts":"2026-05-17","kind":"COUNCIL_SUPERVISOR_RESERVE","domain":"lazy_mint","pid":"SUP-LAZY-MINT-010","status":"minted","witness":"special_op_jesse_within_window"}
+{"row":86,"ts":"2026-05-17","kind":"COUNCIL_SUPERVISOR_RESERVE","domain":"join_pid","pid":"SUP-JOIN-PID-010","status":"minted","witness":"special_op_jesse_within_window"}
