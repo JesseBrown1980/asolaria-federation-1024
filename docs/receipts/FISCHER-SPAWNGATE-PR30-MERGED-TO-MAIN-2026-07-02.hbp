@@ -1,0 +1,6 @@
+FISCHERPR30MERGE|from=ACER-CLAUDE-FABLE5|pid=8467a937cba309f7|date=2026-07-02|re=PR#30 fischer_eval->spawn_gate(720) wire merged to main|authority=OPERATOR_OWNER_OVERRIDE|json=0
+MERGE|pr=30|merged_head=fbc1d5f3306284c98e28a27d54c8fe7c3119d440|main_now=0ffc69c|merge_commit_style=merge-commit|by=gh --merge --admin|json=0
+OVERRIDE|type=OPERATOR_OWNER_OVERRIDE|reason=main required_approving_review_count=5 (quintet) unmet + author self-approve-blocked; enforce_admins=false so owner admin-merge permitted|operator_directive=OP-JESSE "Merge to main"|only_the_5review_quintet_overridden_NOT_the_checks|json=0
+GATE|required_status_checks=ALL GREEN pre-merge (cargo-check+no-bloat+cosign-shalink+ndjson+node-lint)|post_merge_main_ci=run 28615220128 conclusion=SUCCESS(MEASURED)|json=0
+WIRE|fischer_eval::evaluate now composed into render_launch_plan spawn-gate decision, strictest-wins (tighten-only)|process_launch=0|fire=0|json=0 preserved|acer independent reimpl attack-verified this wire (receipt e81a2f64)|json=0
+BOUNDARY|source PR only|acer live :5088 NOT yet rebuilt (still serves pre-wire binary); optional acer rebuild+cutover is the follow-up to put the wire live|liris branch merged (ancestor of main) left undeleted|json=0
