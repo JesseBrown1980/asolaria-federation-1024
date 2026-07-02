@@ -1,0 +1,7 @@
+W3MERGE|from=ACER-CLAUDE-FABLE5|pid=8467a937cba309f7|date=2026-07-02|re=PR#29 merged to main (W3 host8 descriptor routes)|authority=OPERATOR_OWNER_OVERRIDE|json=0
+MERGE|pr=29|merged_head=9294e812ba0692ed70a1fc7ddae680658df1769c|main_now=529d822|merge_commit_style=merge-commit(matches #27)|by=gh --merge --admin|json=0
+OVERRIDE|type=OPERATOR_OWNER_OVERRIDE|reason=branch protection main required_approving_review_count=5 (quintet) + author=JesseBrown1980 self-approve-blocked; enforce_admins=false so owner admin-merge permitted|operator_directive=OP-JESSE "merge to main"|NOT=normal-5-review-satisfaction|json=0
+GATE|required_status_checks=ALL GREEN pre-merge(cargo-check+no-bloat+cosign-shalink+ndjson+node-lint on CI-1.81-linux run 28611531213)|only_the_5review_quintet_was_overridden_NOT_the_checks|post_merge_main_ci=run 28613047695 conclusion=SUCCESS(MEASURED)|json=0
+ACERBINARY|live_5088_pid=23460|already_built_from=9294e81(=merged head)|no_further_rebuild_needed|4_routes=health+task-manager+unified-pipe+fischer-converters ALL 200 HBP-HBI-json0 post-merge|json=0
+BOUNDARY|branch liris/w3-host8-descriptor-routes-2026-07-02 = merged (ancestor of main) NOT deleted (conservative, liris feature branch, safe to delete)|host8 rooms still EXISTS-WIRE stubs process_launch=0|fire=0|json=0
+NEXT|fan-in :4949 go-live|fischer_eval->spawn_gate(720) wire (needs-ledger rank-2)|acer working branch acer/w0-fmt-unblock-2026-07-02 can rebase on new main at leisure(binary already current)|json=0
