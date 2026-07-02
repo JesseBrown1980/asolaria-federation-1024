@@ -251,7 +251,10 @@ mod tests {
 
     #[test]
     fn alphabet_table_length_is_1024() {
-        assert_eq!(BEHCS1024_ALPHABET_TABLE.len() as u32, BEHCS1024_ALPHABET_SIZE);
+        assert_eq!(
+            BEHCS1024_ALPHABET_TABLE.len() as u32,
+            BEHCS1024_ALPHABET_SIZE
+        );
     }
 
     #[test]

@@ -97,7 +97,9 @@ fn verify_chain(rows: &[String]) -> (usize, usize, usize) {
 fn main() {
     // Data dir overridable by argv[1] so the same binary works native-Windows (`C:/...`, default)
     // and under the WSL 1.81 CI toolchain (`/mnt/c/...`).
-    let dir = std::env::args().nth(1).unwrap_or_else(|| DATA_DIR.to_string());
+    let dir = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| DATA_DIR.to_string());
     let (queue, q_present) = read_rows(&format!("{dir}/queue.ndjson"));
     let (votes, v_present) = read_rows(&format!("{dir}/votes.ndjson"));
     let (outcomes, o_present) = read_rows(&format!("{dir}/outcomes.ndjson"));
@@ -165,9 +167,12 @@ fn main() {
     // A missing ledger, or zero outcomes to replay, cannot prove parity. Fail loudly — never a
     // vacuous zero-row PASS (claims-gate scenario: missing/empty ≠ clean-zero-ok).
     let has_data = outcomes.len() + votes.len() + queue.len() > 0;
-    let parity = all_present && has_data && chain_fail == 0 && replay_mismatch == 0 && replay_match > 0;
+    let parity =
+        all_present && has_data && chain_fail == 0 && replay_mismatch == 0 && replay_match > 0;
 
-    println!("VOTEQPARITYRUN|format=hbp_tuple_text|json=0|read_only=1|touched_daemon=0|wrote_ledger=0");
+    println!(
+        "VOTEQPARITYRUN|format=hbp_tuple_text|json=0|read_only=1|touched_daemon=0|wrote_ledger=0"
+    );
     println!(
         "VOTEQPARITYSRC|dir={dir}|present={all_present}|q_present={q_present}|v_present={v_present}|o_present={o_present}|queue_rows={}|votes_rows={}|outcomes_rows={}",
         queue.len(),
