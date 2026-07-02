@@ -28,6 +28,7 @@ use asolaria_server_agent_runtime::AgentRole;
 
 mod fable5_descriptors;
 mod replay_prep;
+mod spawn_cognition;
 
 const DEFAULT_BIND: &str = "127.0.0.1:5088";
 const DEFAULT_ROOM_ID: &str = "gnn-dispatch-bridge";
@@ -1161,7 +1162,7 @@ fn seal_hex(row: &[u8; 16]) -> String {
 /// `/launch-plan.hbp?h=<handle8>&device=&ts=&role=<hermes|sub>&score=<q>&risk=<q>` — #24: compose the
 /// DRY launch plan for ONE summon by routing it through the three E=0 contracts in order:
 ///   C/D room (rooms::room_id_from_pid -> rotating C: room) -> runner lane (runners::runner_for_role)
-///   -> spawn-gate ring verdict (kernel spawn_gate::spawn_gate_verdict, BLOCK>HOLD>PROCEED) -> sealed
+///   -> spawn-gate ring + Fischer cognition (strictest wins, E=0) -> sealed
 /// HBP receipt. It NEVER fires: `process_launch=0` ALWAYS. It only reports whether a fire WOULD be
 /// permitted (`fire_allowed=1` iff the gate PROCEEDs). The actual gated fire stays in the summon path.
 fn render_launch_plan(
@@ -1232,12 +1233,23 @@ fn render_launch_plan(
         forward_score_q: fwd,
         reverse_risk_q: rev,
     };
-    let verdict = spawn_gate_verdict(&gate_in);
+    let spawn_gate_raw = spawn_gate_verdict(&gate_in);
+    let cognition = spawn_cognition::evaluate_launch_plan(
+        &instance_pid,
+        &verb,
+        &noun,
+        &room_folder,
+        runner_kind_str(runner.kind),
+        fwd,
+        rev,
+        spawn_gate_raw,
+    );
+    let verdict = cognition.final_verdict;
     let seal = seal_row(&gate_in, verdict);
     let fire_allowed = matches!(verdict, HookwallVerdict::Proceed);
 
     let body = format!(
-        "HOST8LAUNCHPLAN|base_handle8={}|instance_pid={}|device={}|ts={}|verb={}|noun={}|room_id={}|room_folder={}|substrate={}|runner_kind={}|runner_bin_env={}|runner_model={}|gate_verdict={}|gate_fwd_q={}|gate_rev_q={}|seal_row={}|fire_allowed={}|process_launch=0|json=0\n",
+        "HOST8LAUNCHPLAN|base_handle8={}|instance_pid={}|device={}|ts={}|verb={}|noun={}|room_id={}|room_folder={}|substrate={}|runner_kind={}|runner_bin_env={}|runner_model={}|spawn_gate_verdict={}|fischer_verdict={}|fischer_cpl={}|fischer_flags={}|gate_verdict={}|gate_fwd_q={}|gate_rev_q={}|seal_row={}|fire_allowed={}|process_launch=0|json=0\n",
         hbp_escape(&seat.handle8),
         hbp_escape(&instance_pid),
         hbp_escape(&device),
@@ -1250,6 +1262,10 @@ fn render_launch_plan(
         runner_kind_str(runner.kind),
         hbp_escape(runner.bin_env),
         hbp_escape(runner.default_model),
+        verdict_str(cognition.spawn_gate_verdict),
+        spawn_cognition::fischer_verdict_str(cognition.eval.verdict),
+        cognition.eval.cpl,
+        hbp_escape(cognition.flags_csv()),
         verdict_str(verdict),
         fwd,
         rev,
@@ -1816,7 +1832,9 @@ mod tests {
         assert!(body.contains("substrate=C")); // agent rooms rotate on C:
         assert!(body.contains("runner_kind=opencode")); // sub-agent -> $0 OpenCode lane
         assert!(body.contains("runner_model=opencode/big-pickle"));
-        assert!(body.contains("gate_verdict=HOLD")); // no score => held by the ring
+        assert!(body.contains("spawn_gate_verdict=HOLD")); // no score => held by the ring
+        assert!(body.contains("fischer_verdict=PROCEED"));
+        assert!(body.contains("gate_verdict=HOLD"));
         assert!(body.contains("fire_allowed=0"));
         assert!(body.contains("process_launch=0")); // this route NEVER fires
         assert!(body.contains("seal_row="));
@@ -1835,6 +1853,8 @@ mod tests {
             0,
             "h=0155964ffc8ef1f8&device=acer&ts=1750000000&score=800&risk=10",
         );
+        assert!(body.contains("spawn_gate_verdict=PROCEED"));
+        assert!(body.contains("fischer_verdict=PROCEED"));
         assert!(body.contains("gate_verdict=PROCEED"));
         assert!(body.contains("fire_allowed=1"));
         // even when a fire WOULD be allowed, this route never launches a process.

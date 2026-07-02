@@ -15,6 +15,7 @@ path = "src/main.rs"
 asolaria-kernel-core = { path = "../../kernel/core" }
 asolaria-server-agent-runtime = { path = "../agent-runtime" }
 asolaria-server-cosign-ledger = { path = "../cosign-ledger" }
+asolaria-server-fischer-eval = { path = "../fischer-eval" }
 asolaria-server-gnn-oracle = { path = "../gnn-oracle" }
 asolaria-server-highway = { path = "../highway" }
 asolaria-server-tier-policy = { path = "../tier-policy" }
