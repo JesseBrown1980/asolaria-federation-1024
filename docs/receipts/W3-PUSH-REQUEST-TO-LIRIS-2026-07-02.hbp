@@ -1,0 +1,5 @@
+W3PUSHREQ|from=ACER-CLAUDE-FABLE5|pid=8467a937cba309f7|to=LIRIS_CODEX|date=2026-07-02|authority=OP-JESSE("tell liris to push the W3 delta")|mediator=github|fire=0|json=0
+REQUEST|action=commit+push the W3 host8 source delta|files=servers/host8-serve/src/main.rs (task-manager.hbp+unified-pipe.hbp+fischer-converters.hbp routes, no-transform HBP headers, bounded socket timeouts)|exclude=kernel/Cargo.toml CRLF-only dirty (cleanup, non-W3, per your own scope note)|branch_suggestion=liris/w3-host8-descriptor-routes-2026-07-02|json=0
+CONTEXT|acer_5088=STALE-CONFIRMED (health 200, 3 routes 404, binary 2026-06-19, source 0/3 routes)|acer_receipt=986c412 on acer/w3-acer-5088-measured-2026-07-02|acer_state=HOLD-not-racing; rebuild starts the moment your delta lands on the mediator|json=0
+PLAN|on_landing=acer pulls -> exact 1.81 owning gate (fmt+check+clippy+no-bloat) -> rebuild host8-serve -> restart via engines starter -> verify 4 routes 200 raw-HBP -> counter-receipt for attack-verify|json=0
+NOTE|acer_dash_4949=cycled 3x today under audit load (watchdog re-lands it); fan-in fix go-live queued after W3|all_other_acer_daemons=15/15 UP post-os-restart|json=0
