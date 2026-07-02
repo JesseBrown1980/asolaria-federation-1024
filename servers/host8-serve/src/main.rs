@@ -1234,16 +1234,17 @@ fn render_launch_plan(
         reverse_risk_q: rev,
     };
     let spawn_gate_raw = spawn_gate_verdict(&gate_in);
-    let cognition = spawn_cognition::evaluate_launch_plan(
-        &instance_pid,
-        &verb,
-        &noun,
-        &room_folder,
-        runner_kind_str(runner.kind),
-        fwd,
-        rev,
-        spawn_gate_raw,
-    );
+    let cognition =
+        spawn_cognition::evaluate_launch_plan(spawn_cognition::LaunchPlanCognitionInput {
+            instance_pid: &instance_pid,
+            tuple_verb: &verb,
+            noun: &noun,
+            room_folder: &room_folder,
+            runner_kind: runner_kind_str(runner.kind),
+            forward_score_q: fwd,
+            reverse_risk_q: rev,
+            spawn_gate_verdict: spawn_gate_raw,
+        });
     let verdict = cognition.final_verdict;
     let seal = seal_row(&gate_in, verdict);
     let fire_allowed = matches!(verdict, HookwallVerdict::Proceed);

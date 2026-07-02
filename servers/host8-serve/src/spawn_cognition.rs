@@ -9,6 +9,17 @@ pub(crate) struct SpawnCognition {
     pub(crate) final_verdict: HookwallVerdict,
 }
 
+pub(crate) struct LaunchPlanCognitionInput<'a> {
+    pub(crate) instance_pid: &'a str,
+    pub(crate) tuple_verb: &'a str,
+    pub(crate) noun: &'a str,
+    pub(crate) room_folder: &'a str,
+    pub(crate) runner_kind: &'a str,
+    pub(crate) forward_score_q: u32,
+    pub(crate) reverse_risk_q: u32,
+    pub(crate) spawn_gate_verdict: HookwallVerdict,
+}
+
 impl SpawnCognition {
     pub(crate) fn flags_csv(&self) -> String {
         if self.eval.flags.is_empty() {
@@ -19,31 +30,22 @@ impl SpawnCognition {
     }
 }
 
-pub(crate) fn evaluate_launch_plan(
-    instance_pid: &str,
-    tuple_verb: &str,
-    noun: &str,
-    room_folder: &str,
-    runner_kind: &str,
-    forward_score_q: u32,
-    reverse_risk_q: u32,
-    spawn_gate_verdict: HookwallVerdict,
-) -> SpawnCognition {
+pub(crate) fn evaluate_launch_plan(input: LaunchPlanCognitionInput<'_>) -> SpawnCognition {
     let envelope = FischerEnvelope {
-        pid: Some(instance_pid.to_string()),
+        pid: Some(input.instance_pid.to_string()),
         actor: "host8-serve".to_string(),
         verb: "spawn".to_string(),
-        target: format!("{}:{}", runner_kind, noun),
+        target: format!("{}:{}", input.runner_kind, input.noun),
         payload: format!(
             "tuple_verb={};noun={};room_folder={}",
-            tuple_verb, noun, room_folder
+            input.tuple_verb, input.noun, input.room_folder
         ),
         payload_json_true: false,
         hbp_path: Some("launch-plan.hbp".to_string()),
         sidecar_plan: Some("host8-launch-plan".to_string()),
         ledger_path: Some("host8-launch-plan.hbp".to_string()),
-        tuple: Some(format!("{}|{}", tuple_verb, noun)),
-        cube_47d: Some(room_folder.to_string()),
+        tuple: Some(format!("{}|{}", input.tuple_verb, input.noun)),
+        cube_47d: Some(input.room_folder.to_string()),
         cosign: None,
         halt_path: Some("/halt".to_string()),
         authority_jump: false,
@@ -52,16 +54,19 @@ pub(crate) fn evaluate_launch_plan(
         operator_witness: false,
     };
     let score = FischerScore {
-        composite: format!("forward_q={};reverse_q={}", forward_score_q, reverse_risk_q),
-        l0_real: forward_score_q > 0,
-        shannon: f64::from(forward_score_q.min(1000)) / 1000.0,
+        composite: format!(
+            "forward_q={};reverse_q={}",
+            input.forward_score_q, input.reverse_risk_q
+        ),
+        l0_real: input.forward_score_q > 0,
+        shannon: f64::from(input.forward_score_q.min(1000)) / 1000.0,
         g4_state: "HOST8_LAUNCH_PLAN".to_string(),
     };
     let eval = evaluate(&envelope, &score, true);
-    let final_verdict = strictest_verdict(spawn_gate_verdict, eval.verdict);
+    let final_verdict = strictest_verdict(input.spawn_gate_verdict, eval.verdict);
     SpawnCognition {
         eval,
-        spawn_gate_verdict,
+        spawn_gate_verdict: input.spawn_gate_verdict,
         final_verdict,
     }
 }
@@ -120,16 +125,16 @@ mod tests {
 
     #[test]
     fn default_launch_plan_cognition_preserves_process_hold() {
-        let cognition = evaluate_launch_plan(
-            "0155964ffc8ef1f8",
-            "summon",
-            "AGT-TEST",
-            "omni-room-behcs-256-1",
-            "opencode",
-            0,
-            0,
-            HookwallVerdict::Hold,
-        );
+        let cognition = evaluate_launch_plan(LaunchPlanCognitionInput {
+            instance_pid: "0155964ffc8ef1f8",
+            tuple_verb: "summon",
+            noun: "AGT-TEST",
+            room_folder: "omni-room-behcs-256-1",
+            runner_kind: "opencode",
+            forward_score_q: 0,
+            reverse_risk_q: 0,
+            spawn_gate_verdict: HookwallVerdict::Hold,
+        });
         assert_eq!(cognition.spawn_gate_verdict, HookwallVerdict::Hold);
         assert_eq!(cognition.final_verdict, HookwallVerdict::Hold);
         assert_eq!(cognition.eval.verdict, FischerVerdict::Proceed);
