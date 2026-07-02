@@ -26,6 +26,7 @@ use asolaria_server_agent_runtime::rooms::{
 use asolaria_server_agent_runtime::runners::{runner_for_role, RunnerKind};
 use asolaria_server_agent_runtime::AgentRole;
 
+mod fable5_descriptors;
 mod replay_prep;
 
 const DEFAULT_BIND: &str = "127.0.0.1:5088";
@@ -820,6 +821,9 @@ fn render_feed(
         "HOST8ROUTE|path=/seat.hbp?h=<handle8>|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/seat/<handle8>.hbp|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/count.hbp|method=GET|format=HBP|json=0".to_string(),
+        "HOST8ROUTE|path=/task-manager.hbp|method=GET|format=HBP|view_only=1|no_kill=1|json=0".to_string(),
+        "HOST8ROUTE|path=/unified-pipe.hbp|method=GET|format=HBP|view_only=1|fire=0|json=0".to_string(),
+        "HOST8ROUTE|path=/fischer-converters.hbp|method=GET|format=HBP|view_only=1|process_launch=0|json=0".to_string(),
         "HOST8ROUTE|path=/summon.hbp?h=<handle8>&device=<d>&ts=<unix>&fire=<0|1>|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/v1/envelope.hbp?caller=&target=&verb=&payload=&cube=&glyph=&cosign=&ttl=&ant=&row=[&ts=]|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/launch-plan.hbp?h=<handle8>&device=<d>&ts=<unix>&role=<hermes|sub>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
@@ -1398,6 +1402,10 @@ fn handle_client(
     gnn: &mut GnnInference,
     registry: &mut AgentRegistry,
 ) {
+    // Browser projections can open idle/preconnect sockets. Keep Host8 bounded:
+    // an idle client must not hold the single-threaded HBP route loop.
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(1000)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(1000)));
     let mut buffer = [0u8; 2048];
     let read = match stream.read(&mut buffer) {
         Ok(read) => read,
@@ -1417,6 +1425,16 @@ fn handle_client(
         ),
         "/seats.hbp" => ("200 OK", render_seats(book)),
         "/count.hbp" => ("200 OK", render_count(book)),
+        "/task-manager.hbp" => ("200 OK", fable5_descriptors::render_task_manager()),
+        "/unified-pipe.hbp" => ("200 OK", fable5_descriptors::render_unified_pipe()),
+        "/fischer-converters.hbp" => (
+            "200 OK",
+            fable5_descriptors::render_fischer_converters(
+                &room.id,
+                &room.room_stub,
+                &room.host_handle8,
+            ),
+        ),
         "/summon.hbp" => {
             let (ok, body) = render_summon(book, config, query);
             (if ok { "200 OK" } else { "404 Not Found" }, body)
@@ -1472,7 +1490,7 @@ fn handle_client(
         other => ("404 Not Found", render_not_found(other)),
     };
     let response = format!(
-        "HTTP/1.1 {}\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: {}\r\n\r\n{}",
+        "HTTP/1.1 {}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Language: en-US\r\nCache-Control: no-store, no-transform\r\nX-Content-Type-Options: nosniff\r\nX-Asolaria-Hot-Path: HBP-HBI-json0\r\nContent-Disposition: inline; filename=\"host8.hbp\"\r\nContent-Length: {}\r\n\r\n{}",
         status,
         body.len(),
         body
