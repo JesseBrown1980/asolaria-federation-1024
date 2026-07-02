@@ -87,6 +87,11 @@ pub fn py_escape_string(s: &str) -> String {
             '\r' => out.push_str("\\r"),
             '\u{0000}'..='\u{001f}' => out.push_str(&format!("\\u{:04x}", ch as u32)),
             '\u{0080}'..='\u{ffff}' => out.push_str(&format!("\\u{:04x}", ch as u32)),
+            // Printable ASCII (U+0020..U+007F) not otherwise escaped: emit verbatim, matching
+            // python json.dumps(ensure_ascii=False). This guards the U+10000+ surrogate-pair math
+            // below from underflowing on BMP chars — a debug panic that crashed the /verify
+            // recompute path on every ASCII row key (e.g. "seq", "row_hash").
+            c if (c as u32) < 0x1_0000 => out.push(c),
             _ => {
                 let v = ch as u32 - 0x1_0000;
                 let hi = 0xd800 + ((v >> 10) & 0x3ff);
