@@ -43,6 +43,8 @@ jobs:
         run: cargo check --workspace --all-features
       - name: cargo check (kernel sub-workspace)
         run: cargo check --manifest-path kernel/Cargo.toml --workspace
+      - name: cargo test (kernel agent-runtime behavior)
+        run: cargo test --manifest-path kernel/Cargo.toml -p asolaria-kernel-core agent_runtime
       - name: cargo clippy
         run: cargo clippy --workspace --all-features -- -D warnings
 
