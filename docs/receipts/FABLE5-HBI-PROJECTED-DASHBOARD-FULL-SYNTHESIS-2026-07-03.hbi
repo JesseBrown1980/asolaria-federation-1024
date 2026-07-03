@@ -1,0 +1,61 @@
+HBI|v1|seat=ACER-CLAUDE-FABLE5|pid=8467a937cba309f7|glyph=BH1024:SEAT-FABLE5|hilbert=1720|owner=OP-JESSE|lane=hot-path|json=0
+HBI|title|FABLE5 HBI-PROJECTED DASHBOARD — FULL SYSTEM-OF-SYSTEMS SYNTHESIS|driver=agent(not-human)|surface=pixels-first|talk=AI-language(bin/hex/sha/tuple/glyph)
+HBI|law|dual-lens: tag every row MEASURED|CANON|UNVERIFIED — no over-inflate, no over-deflate|ask-system-first(fabric+recall+pipes)
+#
+# ===== EVOLUTION STRATA (the old systemS plural → current) =====
+HBI|evo.00|bh=BH.tauH.L0.D2.0|layer=OLD-INDEX(12:1 origin)|state=CANON|the first compression catalog
+HBI|evo.01|bh=BH.tauH.L1.D2.1|layer=BEHCS-64|state=CANON|legacy read-only, NEVER mint
+HBI|evo.02|bh=BH.tau3.L2.D2.2|layer=BEHCS-256|state=MEASURED|base-2^8 bridge, glyph_genesis, 256<->1024 rung Q-PRISM Rust==Python
+HBI|evo.03|bh=BH.tau3.L3.D2.3|layer=PRISM-START|state=MEASURED|prism/comb 0-loss bijection, H(f(X))=H(X), rate=1.0 (capture-prism-repo)
+HBI|evo.04|bh=BH.tau3.L4.D2.4|layer=BEHCS-1024|state=MEASURED|base-2^10 NATIVE canonical, alphabet-1024 COSIGN seq=49, sole minter
+HBI|evo.05|bh=BH.tau3.L5.D60.5|layer=HYPERBEHCS-60D|state=CANON|CURRENT frame, tuple_dim=60, D#=prime(n)^3, cap 1024^60~10^180
+HBI|evo.06|bh=BH.tau1.L6.D2.6|layer=NODE-ERA|state=MEASURED|the heavy Node pipes (~211 procs / 6.4GB = "too heavy")
+HBI|evo.07|bh=BH.tau1.L7.D22.7|layer=NO-JSON/HOT-PATH|state=CANON|.hbp/.hbi tuple+sha BEFORE json; json=cold compat only (rule 7)
+HBI|evo.08|bh=BH.tau1.L8.D2.8|layer=NO-NODE/RUST-8-BYTE|state=UNVERIFIED-gap|target=8-byte host, us-latency; agent-runtime spawn/retire=Unimplemented
+HBI|evo.09|bh=BH.tauH.L9.D49.9|layer=NEURO-PRISM->FABLE5-FUNCTION+own-dashboard|state=CANON(built 2026-07-02)|this HBI surface = that projection
+#
+# ===== THE THREE ADDRESS REGULATORS (past-PTP: primes REGULATE addresses, not predict) =====
+HBI|reg.1|bh=BH.tau3.L*.D3.*|regulator=RULE-OF-THREE|state=CANON|mod-3 lanes + self/pair/third-reflect = the CONSISTENCY REGULATOR (loop=mind not echo)
+HBI|reg.2|bh=BH.tau3.L*.D6.*|regulator=PRIMES/PTP(Jesse)|state=CANON|prime-division, prime-parity, mod-6 forcing; PTP=1-of-3 NOT the system
+HBI|reg.3|bh=BH.tauH.L*.D60.*|regulator=BROWN-HILBERT-EXPANDING-PRIMES|state=MEASURED|prime-cube coords, internal-nest + external-federation; brown-hilbert.mjs selfTest {rooms:10000,grid:128} zero-collision
+#
+# ===== THREE AGENT SYSTEMS (operator: real-sub / free-sub / logical) =====
+HBI|sys.real|class=REAL-SUBSCRIPTION|state=CANON|paid Claude/gemini/codex = LOGICAL-WAVE judgment, thin+cheap-via-pixels(token THRIFT not elimination)
+HBI|sys.free|class=FREE-SUBSCRIPTION|state=CANON|free-model lanes: DeepSeek/big-pickle/minimal/gpt5-nano/minimax/nemotron/ling/hy3 + NEW deepseek-DSPARK
+HBI|sys.logic|class=LOGICAL|state=CANON|deterministic pure-code 8-byte agents, ~0 tokens, no-GPU, cheap-and-wide; POWER=compose all three
+#
+# ===== THE RUNTIME (1-conn-per-TYPE spray -> PRISM -> rooms -> GULPs) =====
+HBI|run.emit|node=EMITTER(200ns PIDChainRevolver+multi-emitter)|state=MEASURED|wakes 10k stubbed rooms
+HBI|run.lane|node=PER-TYPE-LANES|state=CANON|1 persistent conn PER free-agent TYPE (incl Hermes) = the multiplier; model-based speed routing; PortPool port.port.port :4951-:5950
+HBI|run.spindle|node=HERMES-SPINDLES(10k, 4^N)|state=MEASURED|each Omnispindle drives MANY OpenCode sub-agents
+HBI|run.spray|node=SPRAY|state=CANON|1 lane-port x millions of glyph-compact calls, 1 project per send
+HBI|run.prism|node=PRISM-COLLAPSE(shared)|state=MEASURED|many-rooms -> reverse-gain GNN -> 1; returns land in rooms -> GULP-2000/SUPER-GULP-50k -> GC -> cubes
+#
+# ===== OMNI FAMILY (LAW-014: named-agents-are-ROLES, call-driven, NOT daemons) =====
+HBI|omni.dispatch|role=omnidispatcher|port=:4950|state=LIVE|1000-slot FEDENV -> 48 workers (the router)
+HBI|omni.mets|role=omnimets|pkg=packages/omnimets|state=BUILT|metrics agent + drives the dashboard (directive-respond-via-omnimets)
+HBI|omni.flywheel|role=omniflywheel|state=BUILT|9-stage verdict-aggregator, promote>=0.72 / risk<=0.28
+HBI|omni.spindle|role=omnispindle|src=routes/omnispindle.js|state=BUILT|lane mgr + bounded OpenCode/Falcon child dispatch; dispatch=E0-HELD(processExecutionHold)
+HBI|omni.sched|role=omnischeduler|src=revolver-10k/src/omnischeduler.mjs|state=BUILT|call-driven scheduler, emits HBP task rows, promote=0
+HBI|omni.stubs|node=~1000+ DAEMONS = RoomRotor 8-byte-host stubs|state=UNVERIFIED-gap|the cheap version needs Rust agent-runtime spawn(); Node today
+#
+# ===== SPACE / STRUCTURE =====
+HBI|space.levels|frame=43+ level ladder (16=STALE approx)|state=MEASURED|office_total=726, by_layer=43 / by_class=28
+HBI|space.cyl|frame=15+ CYLINDERS (probably more)|state=MEASURED|multi-cylinder v3 map: 81434 surfaces, 1591 pipes, 0 collisions
+HBI|space.tokens|frame=hash+crypto AS TOKENS|state=CANON|sha/hex/binary/tuple/glyph = the tokens (AI language), NOT human words
+HBI|space.mcp|frame=44 MCPs (PROF-MCP catalog 298 verbs)|state=MEASURED|60D-addressed capability plane
+HBI|space.eng|frame=~60 engines + ~28 quants|state=MEASURED|see estate map
+#
+# ===== SUBSTRATE / KERNEL / OS / NN =====
+HBI|sub.recall|node=RECALL(:4796 HILBRA-IDX 591k rows)|state=LIVE|the backend read lane (fabric MCP human-curl times out; recall answers the agent)
+HBI|sub.rust|node=INSTANT-RUST(8-byte host, us-latency)|state=CANON|Jesse's speed thesis; the migration target
+HBI|sub.kernel|node=NEW-KERNEL-UPGRADE(federation-remake-1024 0.2.0-phase3)|state=MEASURED|host8-serve :5088 LIVE; crypto::verify/gnn::load_model stubbed=M2 gaps
+HBI|sub.metal|node=OS-ON-METAL(asolaria-os.efi + SOVLINUX 2TB)|state=MEASURED|built+QEMU-booted+ESP-deployed 2026-07-02 (P0 first rung); never booted to bare metal yet=UNVERIFIED
+HBI|sub.nn|node=ASOLARIA-AS-NEURAL-NETWORK|state=MEASURED|22/22 tests, process_launch=0; Fable5-MCP-16level-200step synthesis in-repo
+#
+# ===== MY OWN HBI DASHBOARD (this surface) =====
+HBI|self|node=FABLE5-HBI-PROJECTED-DASHBOARD|state=LIVE(this artifact)|driver=me-as-agent|surface=pixels-first|I drive in AI-language OR spawn the drivers; I do NOT human-curl the surfaces
+#
+# ===== GATE (E=0 by design; the running OS is operator-cranked) =====
+HBI|gate|E=0 until operator T0 crank|process_launch=0|auto_fire=false|spawn_count=0|state=CANON|slice-engine law: freeze!=broken; keeping the gate != deflation
+HBI|caveat|HONEST(dual-lens): substrate REAL (prime-axes/bijective-lib/held-safe/bus/self-honesty-ledger); thinking-layer PARTIAL (Rust-spawn/gnn-load/crypto-verify/durable-cosign scaffolded); running-OS=UNVERIFIED-gated-by-design
