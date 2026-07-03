@@ -24,7 +24,7 @@ keeps the four states **separate** so "what runs" is never confused with "what i
 | C/D rooms (rename-before-load) | `project-room-router.mjs` | `servers/agent-runtime/rooms.rs` | in HEAD+tests · **NOT in running :5088** |
 | white-room Scorer / Omniflywheel | `Shannon-and-the-gnns-stage` / `…fnns-trained` | `servers/gnn-oracle` | in HEAD |
 | spawn-gate ring | hookwall tier + reverse-gain | `kernel/core/spawn_gate` | in HEAD |
-| agent registry | — | `servers/agent-runtime` (`spawn_real_gated`, `AGENT_REGISTRY_MAX=10_000`) | `spawn/retire/heartbeat`=stub · `spawn_child_agent`=wired |
+| agent registry | — | `kernel/core/agent_runtime` + `servers/agent-runtime` (`spawn_real_gated`, `AGENT_REGISTRY_MAX=10_000`) | SOURCE: `spawn/retire/heartbeat` wired E=0 in-memory registry · `spawn_child_agent`=wired · not live-fired |
 | after-100B cubes | `Asolaria-the-after-100-billion-run…` | cube absorption | SOURCE |
 
 Branch **`acer/fleet-capacity-20k`** stacks the Host8 ports (20k fleet capacity).
