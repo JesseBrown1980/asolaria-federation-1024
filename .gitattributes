@@ -6,3 +6,7 @@
 Cargo.toml eol=lf
 Cargo.lock eol=lf
 servers/vote-quorum/** eol=lf
+.gitattributes text eol=lf
+docs/session-2026-07-03-fable5/*.hbp text eol=lf
+docs/session-2026-07-03-fable5/*.md text eol=lf
+docs/session-2026-07-03-fable5/*.sha256 text eol=lf
