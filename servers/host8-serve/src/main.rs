@@ -26,7 +26,9 @@ use asolaria_server_agent_runtime::rooms::{
 use asolaria_server_agent_runtime::runners::{runner_for_role, RunnerKind};
 use asolaria_server_agent_runtime::AgentRole;
 
+mod fable5_descriptors;
 mod replay_prep;
+mod spawn_cognition;
 
 const DEFAULT_BIND: &str = "127.0.0.1:5088";
 const DEFAULT_ROOM_ID: &str = "gnn-dispatch-bridge";
@@ -820,6 +822,9 @@ fn render_feed(
         "HOST8ROUTE|path=/seat.hbp?h=<handle8>|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/seat/<handle8>.hbp|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/count.hbp|method=GET|format=HBP|json=0".to_string(),
+        "HOST8ROUTE|path=/task-manager.hbp|method=GET|format=HBP|view_only=1|no_kill=1|json=0".to_string(),
+        "HOST8ROUTE|path=/unified-pipe.hbp|method=GET|format=HBP|view_only=1|fire=0|json=0".to_string(),
+        "HOST8ROUTE|path=/fischer-converters.hbp|method=GET|format=HBP|view_only=1|process_launch=0|json=0".to_string(),
         "HOST8ROUTE|path=/summon.hbp?h=<handle8>&device=<d>&ts=<unix>&fire=<0|1>|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/v1/envelope.hbp?caller=&target=&verb=&payload=&cube=&glyph=&cosign=&ttl=&ant=&row=[&ts=]|method=GET|format=HBP|json=0".to_string(),
         "HOST8ROUTE|path=/launch-plan.hbp?h=<handle8>&device=<d>&ts=<unix>&role=<hermes|sub>&score=<q>&risk=<q>|method=GET|format=HBP|json=0".to_string(),
@@ -1157,7 +1162,7 @@ fn seal_hex(row: &[u8; 16]) -> String {
 /// `/launch-plan.hbp?h=<handle8>&device=&ts=&role=<hermes|sub>&score=<q>&risk=<q>` — #24: compose the
 /// DRY launch plan for ONE summon by routing it through the three E=0 contracts in order:
 ///   C/D room (rooms::room_id_from_pid -> rotating C: room) -> runner lane (runners::runner_for_role)
-///   -> spawn-gate ring verdict (kernel spawn_gate::spawn_gate_verdict, BLOCK>HOLD>PROCEED) -> sealed
+///   -> spawn-gate ring + Fischer cognition (strictest wins, E=0) -> sealed
 /// HBP receipt. It NEVER fires: `process_launch=0` ALWAYS. It only reports whether a fire WOULD be
 /// permitted (`fire_allowed=1` iff the gate PROCEEDs). The actual gated fire stays in the summon path.
 fn render_launch_plan(
@@ -1228,12 +1233,24 @@ fn render_launch_plan(
         forward_score_q: fwd,
         reverse_risk_q: rev,
     };
-    let verdict = spawn_gate_verdict(&gate_in);
+    let spawn_gate_raw = spawn_gate_verdict(&gate_in);
+    let cognition =
+        spawn_cognition::evaluate_launch_plan(spawn_cognition::LaunchPlanCognitionInput {
+            instance_pid: &instance_pid,
+            tuple_verb: &verb,
+            noun: &noun,
+            room_folder: &room_folder,
+            runner_kind: runner_kind_str(runner.kind),
+            forward_score_q: fwd,
+            reverse_risk_q: rev,
+            spawn_gate_verdict: spawn_gate_raw,
+        });
+    let verdict = cognition.final_verdict;
     let seal = seal_row(&gate_in, verdict);
     let fire_allowed = matches!(verdict, HookwallVerdict::Proceed);
 
     let body = format!(
-        "HOST8LAUNCHPLAN|base_handle8={}|instance_pid={}|device={}|ts={}|verb={}|noun={}|room_id={}|room_folder={}|substrate={}|runner_kind={}|runner_bin_env={}|runner_model={}|gate_verdict={}|gate_fwd_q={}|gate_rev_q={}|seal_row={}|fire_allowed={}|process_launch=0|json=0\n",
+        "HOST8LAUNCHPLAN|base_handle8={}|instance_pid={}|device={}|ts={}|verb={}|noun={}|room_id={}|room_folder={}|substrate={}|runner_kind={}|runner_bin_env={}|runner_model={}|spawn_gate_verdict={}|fischer_verdict={}|fischer_cpl={}|fischer_flags={}|gate_verdict={}|gate_fwd_q={}|gate_rev_q={}|seal_row={}|fire_allowed={}|process_launch=0|json=0\n",
         hbp_escape(&seat.handle8),
         hbp_escape(&instance_pid),
         hbp_escape(&device),
@@ -1246,6 +1263,10 @@ fn render_launch_plan(
         runner_kind_str(runner.kind),
         hbp_escape(runner.bin_env),
         hbp_escape(runner.default_model),
+        verdict_str(cognition.spawn_gate_verdict),
+        spawn_cognition::fischer_verdict_str(cognition.eval.verdict),
+        cognition.eval.cpl,
+        hbp_escape(cognition.flags_csv()),
         verdict_str(verdict),
         fwd,
         rev,
@@ -1398,6 +1419,10 @@ fn handle_client(
     gnn: &mut GnnInference,
     registry: &mut AgentRegistry,
 ) {
+    // Browser projections can open idle/preconnect sockets. Keep Host8 bounded:
+    // an idle client must not hold the single-threaded HBP route loop.
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(1000)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(1000)));
     let mut buffer = [0u8; 2048];
     let read = match stream.read(&mut buffer) {
         Ok(read) => read,
@@ -1417,6 +1442,16 @@ fn handle_client(
         ),
         "/seats.hbp" => ("200 OK", render_seats(book)),
         "/count.hbp" => ("200 OK", render_count(book)),
+        "/task-manager.hbp" => ("200 OK", fable5_descriptors::render_task_manager()),
+        "/unified-pipe.hbp" => ("200 OK", fable5_descriptors::render_unified_pipe()),
+        "/fischer-converters.hbp" => (
+            "200 OK",
+            fable5_descriptors::render_fischer_converters(
+                &room.id,
+                &room.room_stub,
+                &room.host_handle8,
+            ),
+        ),
         "/summon.hbp" => {
             let (ok, body) = render_summon(book, config, query);
             (if ok { "200 OK" } else { "404 Not Found" }, body)
@@ -1472,7 +1507,7 @@ fn handle_client(
         other => ("404 Not Found", render_not_found(other)),
     };
     let response = format!(
-        "HTTP/1.1 {}\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: {}\r\n\r\n{}",
+        "HTTP/1.1 {}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Language: en-US\r\nCache-Control: no-store, no-transform\r\nX-Content-Type-Options: nosniff\r\nX-Asolaria-Hot-Path: HBP-HBI-json0\r\nContent-Disposition: inline; filename=\"host8.hbp\"\r\nContent-Length: {}\r\n\r\n{}",
         status,
         body.len(),
         body
@@ -1798,7 +1833,9 @@ mod tests {
         assert!(body.contains("substrate=C")); // agent rooms rotate on C:
         assert!(body.contains("runner_kind=opencode")); // sub-agent -> $0 OpenCode lane
         assert!(body.contains("runner_model=opencode/big-pickle"));
-        assert!(body.contains("gate_verdict=HOLD")); // no score => held by the ring
+        assert!(body.contains("spawn_gate_verdict=HOLD")); // no score => held by the ring
+        assert!(body.contains("fischer_verdict=PROCEED"));
+        assert!(body.contains("gate_verdict=HOLD"));
         assert!(body.contains("fire_allowed=0"));
         assert!(body.contains("process_launch=0")); // this route NEVER fires
         assert!(body.contains("seal_row="));
@@ -1817,6 +1854,8 @@ mod tests {
             0,
             "h=0155964ffc8ef1f8&device=acer&ts=1750000000&score=800&risk=10",
         );
+        assert!(body.contains("spawn_gate_verdict=PROCEED"));
+        assert!(body.contains("fischer_verdict=PROCEED"));
         assert!(body.contains("gate_verdict=PROCEED"));
         assert!(body.contains("fire_allowed=1"));
         // even when a fire WOULD be allowed, this route never launches a process.
