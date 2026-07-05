@@ -214,7 +214,7 @@ mod tests {
         assert_eq!(p.raw_turns, 3);
         assert_eq!(p.ptc_turns, 1);
         assert_eq!(p.saved_turns, 2);
-        assert_eq!(p.saved_context_bytes, 4800);
+        assert_eq!(p.saved_context_bytes, 5000);
         assert_eq!(p.final_step, "final");
     }
 

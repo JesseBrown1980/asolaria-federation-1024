@@ -1,2 +1,2 @@
 {"seq":1,"event":"FIXTURE-A","antecedents":["0000000000000000"],"ts":"2026-06-25T00:00:00.000Z","appended_by_daemon":"ASOLARIA-COSIGN-CHAIN-SINGLE-WRITER-DAEMON-PID-2026-05-23","nested":{"b":2,"a":1},"row_hash":"101b6e1b41a4038f"}
-{"seq":2,"event":"FIXTURE-B","antecedents":["101b6e1b41a4038f"],"ts":"2026-06-25T00:00:01.000Z","appended_by_daemon":"ASOLARIA-COSIGN-CHAIN-SINGLE-WRITER-DAEMON-PID-2026-05-23","value":"olá","row_hash":"ff433399335fe8ad"}
+{"seq":2,"event":"FIXTURE-B","antecedents":["101b6e1b41a4038f"],"ts":"2026-06-25T00:00:01.000Z","appended_by_daemon":"ASOLARIA-COSIGN-CHAIN-SINGLE-WRITER-DAEMON-PID-2026-05-23","value":"ol\u00e1","row_hash":"ff433399335fe8ad"}
