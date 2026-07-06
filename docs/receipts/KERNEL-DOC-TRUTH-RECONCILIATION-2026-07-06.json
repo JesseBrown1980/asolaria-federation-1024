@@ -1,0 +1,27 @@
+{
+  "schema": "asolaria.kernel_doc_truth_reconciliation.v2",
+  "date": "2026-07-06",
+  "repo": "C:/asolaria-acer/federation-remake-1024",
+  "changed_file": "kernel/docs/PHASE_10_SHIP_CHECKLIST.md",
+  "changed_file_sha256": "939d3f067cc870474c408ed1784b848233c7f590aa4d04bc0a2f57c3ce88415f",
+  "fabric_council_id": "council-q-1783349246650-t5fl1p",
+  "fabric_hbp_row_hash": "8f8632a4efd65bf6",
+  "measurements": {
+    "x86_64_uefi_target": "installed",
+    "phase3_state": "15 FULL + 1 DIVERGING STUB",
+    "cargo_test": "cargo test --lib --locked passed: 268 passed, 0 failed, 1 ignored",
+    "cargo_check": "cargo check --workspace --locked passed",
+    "aarch64_uefi_target": "not installed",
+    "qemu_ovmf_wsl_boot": "green to ASOLARIA ASI OS banner",
+    "qemu_receipt_sha256": "0acfd21a78a2425eb9bf1c2cd4161e2ec80a68b0e4a7507f8779b35de3a871cf"
+  },
+  "boundaries": [
+    "not v1.0.0 ship-green",
+    "no usb write",
+    "no boot-entry edit",
+    "no merge or release tag",
+    "physical USB boot visibility not proven",
+    "Phase-8 drills pending",
+    "cross-vantage cosigns/parity pending"
+  ]
+}
