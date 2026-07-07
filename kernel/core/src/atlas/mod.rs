@@ -237,13 +237,13 @@ mod tests {
 
     #[test]
     fn is_valid_cp_is_const() {
-        // Compile-time evaluation — assigning into a const proves const-fn-ness.
-        const VALID_ZERO: bool = is_valid_cp(0);
-        const VALID_MAX: bool = is_valid_cp(BEHCS_1024_MAX_CP);
-        const VALID_OOB: bool = is_valid_cp(BEHCS_1024_CP_COUNT);
-        assert!(VALID_ZERO);
-        assert!(VALID_MAX);
-        assert!(!VALID_OOB);
+        // Compile-time evaluation proof: these `const _` assertions fail the BUILD
+        // (not a runtime check) if the const fn evaluates wrong — a stronger proof of
+        // const-fn-ness than a runtime assert, and not flagged by
+        // clippy::assertions_on_constants.
+        const _: () = assert!(is_valid_cp(0));
+        const _: () = assert!(is_valid_cp(BEHCS_1024_MAX_CP));
+        const _: () = assert!(!is_valid_cp(BEHCS_1024_CP_COUNT));
     }
 
     #[test]

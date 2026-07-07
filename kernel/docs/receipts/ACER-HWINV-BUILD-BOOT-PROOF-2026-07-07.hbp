@@ -1,0 +1,10 @@
+HBP_PACKET|id=ACER_HWINV_BUILD_BOOT_PROOF_20260707|format=hbp_tuple_text|json=0|seat=ACER-CLAUDE-FABLE5|pid=8467a937cba309f7|owner=OP-JESSE|created=2026-07-07
+CLAIM|text=acer_kernel_boot_now_dumps_a_read-only_PCI_hardware_inventory_over_serial_before_init
+SCOPE|machine_specific=acer_Nitro_AN515-52|milestone=pre-driver_metal-readiness_inventory|branch=acer/kernel-boot-uefi-firstlight-2026-07-02|repo=asolaria-federation-1024
+FILES|added=kernel/boot/src/hwinv.rs|edited=kernel/boot/src/main.rs(mod_hwinv+pci_scan_call_after_banner)
+BUILD|efi=asolaria-os.efi|bytes=11264|sha256=5471730542d2e95b09face0001601cc65970c2e105f03070397f007926957940|toolchain=rustc_1.96|target=x86_64-unknown-uefi|exit=0|time=6.45s|tag=MEASURED
+QEMU|machine=q35|ovmf=OVMF_CODE_4M.fd|banner=ASOLARIA_ASI_OS_0.2.0-phase3-scaffold|hwinv_ran=YES|devices_enumerated=6|tag=MEASURED
+PCI_QEMU|00:00.0=8086:29c0_host_bridge_cls06:00|00:01.0=1234:1111_vga_cls03:00|00:02.0=8086:10d3_e1000_net_cls02:00|00:1f.0=8086:2918_lpc_cls06:01|00:1f.2=8086:2922_ahci_sata_cls01:06|00:1f.3=8086:2930_smbus_cls0c:05
+READ_ONLY|pci_config_reads_only|config_writes=0|bar_access=0|mmio=0|storage_cmds=0|disk_mutation=impossible_by_construction
+BOUNDARY|qemu_emulates_plain_AHCI_8086:2922_NOT_acer_VMD|acer_metal_expected=8086:282A_class01:04_RST_premium_raid|proves=code_path_works_in_emulation|does_not_prove=physical_metal(secure_boot_ON_blocks_unsigned_efi)
+NEXT|on_acer_metal(secure_boot_off)_this_scan_reveals_8086:282A=the_storage_driver_target|then=implement_intel_rst_vmd_nvme_remap_driver

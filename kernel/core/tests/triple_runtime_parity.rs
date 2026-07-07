@@ -18,13 +18,16 @@
 
 extern crate alloc;
 
-use asolaria_kernel_core::pid::{pid_fingerprint_sha16, validate_pid, ParsedPid, parse_pid};
+use asolaria_kernel_core::pid::{parse_pid, pid_fingerprint_sha16, validate_pid, ParsedPid};
 
 /// Canonical 3-historical-PID test vectors (cross-runtime verified JS=Python; Rust algorithm-simulated).
 const HISTORICAL_VECTORS: &[(&str, &str)] = &[
     ("OP-RAYSSA-PID-G0000-A00-W000", "bf5fa7a1a57f384b"),
     ("OPERATOR-PID-H1001-A00-W110", "760ba73b84f31861"),
-    ("ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11", "e00b1a465d6dcb50"),
+    (
+        "ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11",
+        "e00b1a465d6dcb50",
+    ),
 ];
 
 /// Aether migration target PID (per liris validate verdict :82164).
