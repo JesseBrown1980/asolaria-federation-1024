@@ -1,0 +1,9 @@
+HBI_INDEX|packet=ACER-PR39-POSTMERGE-RECONCILE-2026-07-07.hbp|json=0|created=2026-07-07|seat=ACER-CLAUDE-FABLE5
+IDX|key=merge|val=PR39_merged_main_de9cabea_owner_override
+IDX|key=liris_review|val=bilateral_rebuild_gates_pass_claim_precision_findings
+IDX|key=fix_nvme_overclaim|val=hwinv_doc_RST_bridge_only_not_hidden_NVMe
+IDX|key=fix_writes_precision|val=no_config-data_BAR_MMIO_storage_writes_not_blanket_writes=0
+IDX|key=supersede_ci_gate|val=NOT_GREEN_was_1.96_now_GREEN_on_1.81_pin
+IDX|key=supersede_state|val=committed=NO_now_committed+merged
+IDX|key=efi_provenance|val=35db711e=OPERATOR_OBSERVED_ACER_ARTIFACT_not_reproducible_cross_seat
+IDX|key=next|val=metal_boot_confirm_282A_then_RST_VMD_driver
