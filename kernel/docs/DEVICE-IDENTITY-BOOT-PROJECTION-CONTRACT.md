@@ -1,6 +1,6 @@
 # DeviceIdentity / BootProjection Contract (v0.2 — acer↔liris converging)
 
-**Status:** DESIGN · v0.2 draft · acer proposal incorporating **liris `ACCEPT_WITH_REVISIONS`** (PR #42) + operator **failure-shape identity** + **emitted-shape observation** (`BOOTOBS`/`BOOTSHADOW`) + **bounded slice GC/train** (`BOOTSLICE`/`BOOTGC`/`BOOTTRAIN`) + **resource-regulator organs** (`BOOTRESOURCE`/`BOOTREGULATE`). **Still bilateral review — do NOT implement kernel PID-minting until this converges** (coding the wrong identity boundary is the expensive mistake).
+**Status:** DESIGN · v0.3 draft · acer proposal incorporating **liris `ACCEPT_WITH_REVISIONS`** (PR #42) + operator **failure-shape identity** + **emitted-shape observation** (`BOOTOBS`/`BOOTSHADOW`) + **bounded slice GC/train** (`BOOTSLICE`/`BOOTGC`/`BOOTTRAIN`) + **resource-regulator organs** (`BOOTRESOURCE`/`BOOTREGULATE`) + **grounded in the OLD six-body canon** (`colonyAnatomy.js` + 60D decode spec — REUSE, not reinvent). **Still bilateral review — do NOT implement kernel PID-minting until this converges** (coding the wrong identity boundary is the expensive mistake).
 **Anchor:** ASOLARIA-FEDERATION-REMAKE-1024 · **Authored:** 2026-07-07 acer-claude-fable5 (pid 8467a937cba309f7)
 **Cross-ref:** `kernel/boot/src/hwinv.rs`, `kernel/docs/DRIVER_MODEL.md`, `kernel/scripts/mint-edit-token-ledger.sh`, path2/qprism harnesses.
 
@@ -18,6 +18,34 @@ The single most important correction to v0.1:
 - **BootProjection = the VOLATILE pose/state.** This boot's parts, failures, watcher verdicts. Changes boot-to-boot.
 
 **Invariant:** BootProjection (failures, fixes, current pose) must **never** feed back into `device_pid`. If it did, identity would drift every time a bug is fixed — you'd lose the machine's identity by improving it. Failures are *observed against* the stable identity, not *part of* it.
+
+## 2b. Grounded in the OLD six-body canon — REUSE, not reinvent (v0.3)
+
+Per OP-JESSE ("the OLD super-slow amazing system is there still"), acer located the real canon on disk. **This contract must be a thin Rust re-encoding of it, not a fresh taxonomy** ("old node decodes new rust").
+
+**The six-body system** — verbatim from `packages-legacy-import/src/colonyAnatomy.js` ("the civilization's body", a polymorphic self-aware diagnostic framework; colony-aware `LX-`/`IX-` prefix detection so it runs identically on acer + liris):
+
+| Body system | Old-canon function | This contract's rows |
+|---|---|---|
+| **Nervous** | orchestration — PID, spawn, roles | `BOOTPID` / `BOOTPROJ` |
+| **Circulatory** | communication — bus, bridges, sync | **spine** `BOOTBUS`/`BOOTLINK` (v0.4 — the missing connective tissue) |
+| **Skeletal** | structure — index counts, chains | `BOOTPART` |
+| **Memory** | knowledge — memory files, XREF | `BOOTOBS`/`BOOTSHADOW`/`BOOTSLICE`/`BOOTGC` |
+| **Muscular** | execution — routes, tools, deps | `BOOTRESOURCE`/`BOOTREGULATE` + drivers |
+| **Immune** | security — encryption, identity, vault, watchers | `BOOTWATCH`/`BOOTFAIL` + HOLD + cosign |
+
+**Identity fields map onto EXISTING MEASURED D-axes** (`tools/graphify/HYPERBEHCS-60D-DECODE-REFRAME-SPEC.md`) — reuse the axis geometry, don't invent a schema:
+- `device_pid` → **D15 DEVICE** (47³, hardware identity) + **D16 PID** (53³) + **D21 HARDWARE** (73³) + **D34 colony** (`acer|liris|falcon|aether`).
+- Watcher edges → **D39 GNN_EDGE** (167³, 16 connection types).
+
+**The D25 TRINITY (97³) = the compute/hardware/inference layer BELOW the identity contract** (not a body — a stack; canon: USB safety-backup 2026-04-06/07):
+- **LX-489** Omni-processor cube fabric — HOW code runs across hosts (unified CPU/GPU dispatch, replaces N²). *Real code:* `asolaria-as-neural-network/tools/omni-processor/omnitranslator-v0.js`.
+- **LX-490 HAOC** (Hardware Absorption Omnidirectional Cube) — WHICH hosts: auto-discover/classify/**hw-pid-lock** any new USB/BLE/GPU/phone (97³=912673). **`BootProjection` reuses this hw-pid-lock/absorption doctrine directly.**
+- **LX-491** OMNI-GNN — WHAT the code does (inference, 101³).
+
+**The resource-regulator is already live lineage**, not a new idea: `packages/dashboard/src/super-os-viz/super-dashboard-server.mjs` carries the **"Watcher Perimeter" = CPU/GPU/task-manager/process observers feeding Asolaria** — `BOOTRESOURCE`/`BOOTREGULATE` re-encode that existing organ.
+
+**Honest gap (reinvent, not reuse):** the old system's "organs of judgment" (GNN scorer/oracle) were **stubs/hashes**; D48/D49 + the 60D runtime codec were flagged **absent**; `taskManager` was marked "missing"; live cross-host handshake UNVERIFIED. The judgment/GNN organs (`BOOTWATCH` verdicts beyond PASS/HOLD) are the real build, not a port.
 
 ## 3. IDs — full proof + short display (liris revision #2)
 
