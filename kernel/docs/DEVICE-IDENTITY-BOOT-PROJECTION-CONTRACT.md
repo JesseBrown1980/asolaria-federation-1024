@@ -1,6 +1,6 @@
 # DeviceIdentity / BootProjection Contract (v0.2 — acer↔liris converging)
 
-**Status:** DESIGN · v0.2 draft · acer proposal incorporating **liris `ACCEPT_WITH_REVISIONS`** (PR #42) + operator **failure-shape identity** insight. **Still bilateral review — do NOT implement kernel PID-minting until this converges** (coding the wrong identity boundary is the expensive mistake).
+**Status:** DESIGN · v0.2 draft · acer proposal incorporating **liris `ACCEPT_WITH_REVISIONS`** (PR #42) + operator **failure-shape identity** + **emitted-shape observation** (`BOOTOBS`/`BOOTSHADOW`) insight. **Still bilateral review — do NOT implement kernel PID-minting until this converges** (coding the wrong identity boundary is the expensive mistake).
 **Anchor:** ASOLARIA-FEDERATION-REMAKE-1024 · **Authored:** 2026-07-07 acer-claude-fable5 (pid 8467a937cba309f7)
 **Cross-ref:** `kernel/boot/src/hwinv.rs`, `kernel/docs/DRIVER_MODEL.md`, `kernel/scripts/mint-edit-token-ledger.sh`, path2/qprism harnesses.
 
@@ -53,6 +53,14 @@ BOOTWATCH|target=<part_pid>|watcher=OMNISHANNON|verdict=PASS|json=0
 BOOTWATCH|target=<part_pid>|watcher=REVERSE_GNN|verdict=PASS_OR_HOLD|json=0
 ```
 
+**Observations & shadows — recognition by emitted shape, BEFORE pixels (operator insight + liris):**
+The kernel does not only ask "what hardware is present?" — it asks *"what SHAPE did this body emit, from N watchable vantages, including failure?"* Raw kernel-observable bytes (serial trace, PCI config space, memory map) are projected **slice-by-slice into an N-D shadow before they ever become pixels**; the `OMNIBITPIXEL` is a **selector/check unit** for a viewable node in the binary backend, not a rendered pixel. Watchers reorient from any generatable N-vantage (`MTP1/2/3`, reverse-GNN).
+```
+BOOTOBS|projection=<boot_projection_pid>|source=<raw_serial|pci_cfg|mmap>|phase=pre_driver|sha256_full=<sha256>|json=0
+BOOTSHADOW|obs=<obs_pid>|vantage=<MTP1|MTP2|MTP3>|kind=raw_binary_to_2d_shadow|coord=<qprism_60D_BH>|sha256_full=<sha256>|json=0
+```
+`BOOTWATCH` targets any node — part, obs, shadow, or fail. A **failure is a special shadow**: the same slice-to-slice extraction, taken from the emitted failure signal.
+
 **Failures — the body is recognized by HOW parts fail before drivers exist (operator insight):**
 ```
 BOOTFAIL|target=<part_pid>|kind=missing_driver|shape_sig=<sha256>|phase=pre_storage|json=0
@@ -85,7 +93,9 @@ Q-PRISM / prime-cylinder (`qprism-3d-slice-harness` 8/8, `path2-two-shadow-recov
 ## 8. Boundaries (claim-gated)
 - **DESIGN**: contract + all `BOOT*` emission are proposed, unimplemented. hwinv is the only shipped piece.
 - **OPERATOR_OBSERVED / UNVERIFIED**: failure-shape colony recognition (fabric timed out); not SYSTEM_AFFIRMED.
-- **MEASURED**: hwinv builds+QEMU-boots; invariant/specific split backed by two boundaries (§6); Q-PRISM harnesses pass.
+- **MEASURED**: hwinv builds+QEMU-boots; invariant/specific split backed by two boundaries (§6); Q-PRISM watcher harness (omnibit rows, multi-shadow recovery, HOLD, tamper) passes.
+- **NOT literal transistor mapping** (liris): the shadows project **kernel-observable data** (serial / PCI config / memory-map bytes), not silicon. Real transistor/bus-level mapping needs hardware instrumentation (JTAG / bus traces) we do not have — "almost transistor-level" is a metaphor for the projection resolution, not a claim about reading gates.
+- **Never beats Shannon**: slice→shadow→next-slice **re-represents / addresses** (Q-PRISM relocates entropy); it never compresses below `H(X)`. "ULTRA fast" = addressing/recall speed + pre-pixel binary reads, not sub-entropy magic.
 
 ## 9. Next objects (in order)
 1. **liris review of v0.2** → converge on `BOOTPID` / `BOOTPART` / `BOOTWATCH` / `BOOTFAIL` / `OMNIBITPIXEL` field sets.
