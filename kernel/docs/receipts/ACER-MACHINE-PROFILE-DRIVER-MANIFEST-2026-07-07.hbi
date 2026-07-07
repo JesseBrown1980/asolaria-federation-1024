@@ -1,0 +1,11 @@
+HBI_INDEX|packet=ACER-MACHINE-PROFILE-DRIVER-MANIFEST-2026-07-07.hbp|json=0|created=2026-07-07|seat=ACER-CLAUDE-FABLE5
+IDX|key=machine|val=Acer_Nitro_AN515-52
+IDX|key=storage_driver_gap|val=Intel_RST_Premium_8086:282A_NVMe_remap_NOT_IMPLEMENTED
+IDX|key=display|val=Optimus_GTX1050+UHD630_gop_via_igpu
+IDX|key=input|val=Intel_xHCI_USB3.1
+IDX|key=firmware|val=Insyde_V1.28_secureboot_ON_bitlocker_OFF
+IDX|key=unit_tests|val=268_pass_0_fail_1_ignored
+IDX|key=ci_gate|val=NOT_GREEN_clippy_manual_abs_diff_fail+integration_orphaned
+IDX|key=qemu_boot|val=PASS_banner_emulated_only
+IDX|key=toolchain|val=1.96_observed_1.81_expected_no_pin
+IDX|key=metal_boot|val=UNVERIFIED_secureboot_blocks_unsigned

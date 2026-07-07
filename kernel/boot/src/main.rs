@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+mod hwinv;
 mod init;
 
 use core::alloc::{GlobalAlloc, Layout};
@@ -291,6 +292,10 @@ pub extern "efiapi" fn efi_main(
         serial_init();
         serial_print(b"\r\n  ASOLARIA ASI OS   .   kernel 0.2.0-phase3-scaffold   .   booting\r\n");
         serial_print(b"  federation-1024   .   envelope-REPL init   .   E=0   .   fire=0\r\n\r\n");
+        // Pre-driver metal-readiness: dump the PCI hardware inventory over serial
+        // (read-only 0xCF8/0xCFC enumeration). On acer this reveals the Intel RST/VMD
+        // storage controller 8086:282A; under QEMU it lists the emulated q35 devices.
+        hwinv::pci_scan();
         // Graphics console (real monitor / GOP) — same banner.
         uefi_print(
             system_table,

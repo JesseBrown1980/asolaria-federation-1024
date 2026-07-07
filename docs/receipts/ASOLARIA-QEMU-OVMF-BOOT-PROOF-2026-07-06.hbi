@@ -1,0 +1,8 @@
+HBI|artifact=ASOLARIA-QEMU-OVMF-BOOT-PROOF-2026-07-06|ts=2026-07-06T15:28:01.1271734Z
+HBI|pid=ACER-QEMU-OVMF-BOOT-PROOF-20260706|kernel=federation-remake-1024
+HBI|qemu_version=QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.16)
+HBI|ovmf_sha256=3a23911c0b32be25fc3eae579b0b7197d8f321b6f0d6cb16aac25c67f3ec712b
+HBI|log_sha256=ebfb4d0720ca50f9ba41d69954168e5c18460aad3a2fbc1af1bfbc033c0160ed
+HBI|efi_sha256=a38f48f3adb39a4b3d57daf03d2980b0964f0dd509274a84eac61f66a0dcfdfa
+HBI|esp_sha256=f1323a5dbbbbdc035011e89dc1a05a729f62299c550c9383098f17ae0d25b7a4
+HBI|boundary=wsl_emulated_boot_proof_not_physical_usb_boot;no_usb_write;no_boot_entry_edit

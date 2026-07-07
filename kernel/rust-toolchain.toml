@@ -1,0 +1,11 @@
+# Pin the kernel workspace to the canonical CI toolchain (rustc 1.81).
+# Rationale: core/src/lib.rs deliberately #![allow]s 1.95-era clippy lints and
+# documents "CI runs rustc 1.81"; without this pin the default toolchain (1.96)
+# is used, which introduces newer lints (e.g. manual_abs_diff) that fire as
+# false CI-gate failures. Bilateral parity with the liris asolaria-os repo,
+# which already carries this pin.
+[toolchain]
+channel = "1.81"
+components = ["rustfmt", "clippy"]
+targets = ["x86_64-unknown-uefi"]
+profile = "minimal"

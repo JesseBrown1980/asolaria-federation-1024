@@ -10,6 +10,12 @@ description = "Asolaria Federation Remake · x86_64 bare-metal boot stub · Phas
 [[bin]]
 name = "asolaria-os"
 path = "src/main.rs"
+# no_std/no_main UEFI binary: it defines its own panic_impl, so building a std
+# test harness for it duplicates the lang item (E0152). Exclude it from `cargo test`;
+# the boot stub is exercised by the UEFI build + QEMU boot, not host unit tests.
+test = false
+bench = false
+doctest = false
 
 [dependencies]
 asolaria-kernel-core = { path = "../core" }

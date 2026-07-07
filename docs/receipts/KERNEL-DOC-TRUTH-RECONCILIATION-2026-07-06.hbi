@@ -1,0 +1,6 @@
+HBIv1|id=KERNEL-DOC-TRUTH-RECONCILIATION-2026-07-06|subject=PHASE_10_SHIP_CHECKLIST|seat=acer|class=doc-truth-repair|sha256=939d3f067cc870474c408ed1784b848233c7f590aa4d04bc0a2f57c3ce88415f
+HBIv1|dimension=source|phase3=kernel/docs/PHASE_3_WIRING_STATUS.md|state=15_FULL_PLUS_1_DIVERGING_STUB|measured=2026-07-06
+HBIv1|dimension=tests|cargo_test=268_PASS_0_FAIL_1_IGNORED|cargo_check=PASS|target_dir=temp_not_kernel_target
+HBIv1|dimension=boot|qemu_ovmf_wsl_boot=GREEN|physical_usb_boot=UNPROVEN|qemu_receipt_sha256=0acfd21a78a2425eb9bf1c2cd4161e2ec80a68b0e4a7507f8779b35de3a871cf
+HBIv1|dimension=boundary|ship_green=false|usb_write=false|boot_entry_edit=false|merge_or_tag=false
+HBIv1|dimension=next|phase8_drills=true|cross_vantage_cosigns=true|physical_usb_visibility_if_required=true

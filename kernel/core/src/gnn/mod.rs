@@ -156,7 +156,7 @@ mod tests {
     use alloc::vec;
 
     #[test]
-    fn gnn_edges_target_is_2_16M() {
+    fn gnn_edges_target_is_2_16_m() {
         assert_eq!(GNN_EDGES_TARGET, 2_158_671);
     }
 

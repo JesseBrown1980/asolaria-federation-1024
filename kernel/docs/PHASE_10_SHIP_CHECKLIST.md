@@ -6,7 +6,7 @@
 **Scout role:** Concord-Vega (cross-vantage canon-arbiter per `SCOUT_ABILITIES_AND_CONDITIONS.md §8`)
 **Quintuple-auth window:** `:82646` covers (T1-T6 standing through 2026-05-25)
 **Cycle of authoring:** 66
-**Status:** spec-only · this checklist must itself be cosigned before any `v1.0.0` tag is cut
+**Status:** spec-only · 2026-07-06 Acer doc-truth reconciliation applied; this checklist must still be cosigned before any `v1.0.0` tag is cut
 
 ---
 
@@ -28,38 +28,39 @@ Version-string lives in `kernel/core/Cargo.toml`; bump from v0.1.x → v1.0.0 ha
 
 ## 2. Phase-3 syscall wiring (from `PHASE_3_WIRING_STATUS.md`)
 
-Source of truth: `kernel/docs/PHASE_3_WIRING_STATUS.md` (last sync cycle-42; live count is **7/16 + Asolaria scout pushing remaining**). The mission spec for v1.0.0 is permissive: **a HALF/diverging-stub is acceptable if the surface is correct and the absence is documented; an unanchored STUB is ship-blocking**.
+2026-07-06 reconciliation note: this section previously lagged behind `kernel/docs/PHASE_3_WIRING_STATUS.md`. The current source of truth is `kernel/docs/PHASE_3_WIRING_STATUS.md` (last sync 2026-05-13), which reports Phase-3 syscall wiring COMPLETE: **15 FULL + 1 DIVERGING STUB (`sys_exit`) = 16 surface-reserved**. Acer re-measured on 2026-07-06 with `cargo test --lib --locked`: 268 passed, 0 failed, 1 ignored.
+
+The mission spec for v1.0.0 remains conservative: FULL syscall bodies are ship-OK, the diverging `sys_exit` stub is acceptable because it never returns by design, and any newly introduced unanchored STUB is ship-blocking.
 
 Acceptance rules:
 - `FULL` — real impl, exercised by `cargo test --lib`. Ship-OK.
-- `HALF` — diverging stub or anchor-derived constant explicitly documented in source as v0.2-pending. Ship-OK iff the docstring + this table both name v0.2 as the upgrade window.
-- `STUB` — placeholder returns. **Ship-blocking** for v1.0.0 unless table column 4 says otherwise.
+- `DIVERGING STUB` — acceptable only for `sys_exit`, because the syscall never returns by design.
+- `STUB` — placeholder returns. **Ship-blocking** for v1.0.0 unless explicitly accepted by a newer cosigned table.
 
 | # | Syscall | State | Ship-blocking for v1.0.0? | Notes |
 |---|---|---|---|---|
-| 1 | `sys_read` | STUB | **YES** (must reach at least HALF) | needs kernel FD table; classical I/O |
-| 2 | `sys_write` | STUB | **YES** (must reach at least HALF) | needs kernel FD table; classical I/O |
-| 3 | `sys_exec` | STUB | **YES** (must reach at least HALF) | depends on envelope queue real impl |
-| 4 | `sys_fork` | STUB | **YES** (must reach at least HALF) | needs `agent_runtime::AgentRegistry::spawn` + lifecycle FSM |
-| 5 | `sys_exit` | HALF (diverging stub, spin-loop) | NO | v0.1-canon-accepted; spec'd as diverging indefinitely |
-| 6 | `sys_mmap` | STUB | **YES** (must reach at least HALF) | needs frame allocator from boot info — smallest external dep |
-| 7 | `sys_munmap` | STUB | **YES** (must reach at least HALF) | pair-wise with `sys_mmap` |
+| 1 | `sys_read` | FULL | NO | `vfs::vfs_read`; STDIN EOF/Ok(0), reserved FD routing |
+| 2 | `sys_write` | FULL | NO | `vfs::vfs_write`; STDOUT/STDERR accept, STDIN invalid |
+| 3 | `sys_exec` | FULL | NO | envelope dispatch + monotonic exec handle |
+| 4 | `sys_fork` | FULL | NO | `agent_runtime::spawn_child_agent` |
+| 5 | `sys_exit` | DIVERGING STUB | NO | v0.1-canon-accepted; spin-loop never returns |
+| 6 | `sys_mmap` | FULL | NO | `frame_alloc::alloc_pages`; virtual-range scaffold |
+| 7 | `sys_munmap` | FULL | NO | `frame_alloc::free_pages`; validates range/page alignment |
 | 8 | `sys_time` | FULL | NO | `AtomicU64` monotonic; wall-clock+timer-driver punts to v1.1 |
 | 9 | `sys_pid_current` | FULL | NO | sha256-first-8 of `FEDERATION_ANCHOR_PID` = `0xe00b1a465d6dcb50` |
-| 10 | `sys_envelope_send` | STUB | **YES** (must reach at least HALF) | crossbeam-queue binding pending; IPC backbone |
-| 11 | `sys_envelope_recv` | STUB | **YES** (must reach at least HALF) | pair-wise with `sys_envelope_send` |
+| 10 | `sys_envelope_send` | FULL | NO | `envelope::dispatch_enqueue_bytes` |
+| 11 | `sys_envelope_recv` | FULL | NO | `envelope::dispatch_dequeue_bytes` |
 | 12 | `sys_hookwall_pre` | FULL | NO | `hookwall::hookwall_pre`; slot-bounds validated |
 | 13 | `sys_hookwall_post` | FULL | NO | `hookwall::hookwall_post`; verdict recorded locally; cosign-append deferred to ledger |
-| 14 | `sys_cosign_append` | STUB | NO (demote candidate; see §4) | becomes userspace ledger RPC per `MICROKERNEL_REFACTOR_PLAN.md` |
+| 14 | `sys_cosign_append` | FULL | NO (demote candidate; see §4) | `cosign_chain::append`, returns sequence number; still a userspace-ledger demotion candidate |
 | 15 | `sys_tier_query` | FULL | NO | `tier::classify_path`; demote candidate per §4 |
 | 16 | `sys_gnn_infer` | FULL | NO | `gnn::GnnInference::predict_route`; demote candidate per §4 |
 
-**Wire-progress invariant for v1.0.0:** at least **12 of 16** syscalls at HALF or FULL (i.e. all the I/O + IPC + classical primitives must have a real binding, even if its backing store is a placeholder). Currently 7 FULL (post-Asolaria push) + 1 HALF (`sys_exit`) = 8; the 4 IPC + frame-allocator + I/O slots (rows 1, 2, 3, 6, 7, 10, 11) account for the gap. Asolaria scout is pushing rows 6/7/10/11 first per the recommended order in `PHASE_3_WIRING_STATUS.md §"Recommended wire-order for remaining 10"`.
+**Wire-progress invariant for v1.0.0:** at least **12 of 16** syscalls at HALF/FULL. Reconciliation state is **15 FULL + 1 DIVERGING STUB**, so the syscall wire-progress gate is GREEN as of Acer measurement on 2026-07-06. Remaining ship blockers live outside this syscall table: Phase-8 drills, refactor/cosign decision, cross-vantage parity, and boot/readiness proof.
 
 **Audit method:** `grep -nE 'fn sys_[a-z_]+' kernel/core/src/syscall/mod.rs` followed by per-fn read; verify the table column 3 against actual implementation body. Concord-Vega scout invocation triggers on any divergence between table and source.
 
 ---
-
 ## 3. Phase-8 cross-device drills (steps 155 + 156)
 
 Source of truth: `kernel/docs/PHASE_8_CROSS_DEVICE_FEDERATION.md`. Both drills currently show "NOT YET RUN" (table rows 155 + 156). v1.0.0 cannot tag until both are run and pass.
@@ -208,8 +209,8 @@ All gates listed must pass on the named vantage before the tag commit is pinned:
 
 | Gate | Vantage | Command | Required state |
 |---|---|---|---|
-| Cargo lib tests | acer | `cargo test --lib` in `kernel/core/` | ALL GREEN (currently blocked on acer task #11 — cargo install, see §9) |
-| Cargo workspace check | acer | `cargo check --workspace` from `federation-remake-1024/` root | GREEN; depends on §4 refactor outcome |
+| Cargo lib tests | acer | `cargo test --lib --locked` from `kernel/` with temp target dir | GREEN on 2026-07-06: 268 passed, 0 failed, 1 ignored |
+| Cargo workspace check | acer | `cargo check --workspace --locked` from `kernel/` with temp target dir | GREEN on 2026-07-06 |
 | Triple-runtime parity | acer | `kernel/tests/triple_runtime_parity.rs` Rust ≡ JS ≡ Python ≡ Falcon | PASS (per `:82272`, fingerprint `0xe00b1a465d6dcb50`) |
 | Liris JS rig | liris | `node rig/liris-pid-mint-reference.mjs` (and full 20+ test rig) | 20+ tests PASS (currently 11/11 on the reference subset; PID-mint sha16 `fd7c341eabf40e95`) |
 | Aether v3 python validator | aether | the v3 validator referenced in `:86485` | 13/13 PASS |
@@ -224,35 +225,28 @@ Any gate red → no tag. Cycle-66 is the target cycle for first green-board atte
 
 ---
 
-## 9. Acer task #11 (cargo install) — explicit critical-path dependency
+## 9. Acer task #11 (cargo install) — closed by 2026-07-06 reconciliation
 
-**Statement:** v1.0.0 cannot tag-and-ship until acer can run `cargo test --lib` to verify all wired syscalls + `PidSubclass` tests pass. Cargo install is on the critical path.
+**Statement:** Acer can now run the kernel Rust toolchain locally. The previous blocker was real historically, but it is no longer the current state.
 
-Currently (per `MICROKERNEL_REFACTOR_PLAN.md` closing note: *"the v0.1 modules remain in-place + functional (compile-fail today only because cargo not installed; not a microkernel issue)"*) — acer has no rustc/cargo toolchain installed. This is acer task #11 in the operator backlog.
+MEASURED_ACER 2026-07-06:
+- `cargo --version` returned `cargo 1.95.0 (f2d3ce0bd 2026-03-21)`.
+- `cargo test --lib --locked` passed with 268 tests passed, 0 failed, 1 ignored, using `C:/tmp/asolaria-kernel-target-20260706` to avoid the stale access-denied lock under `kernel/target`.
+- `cargo check --workspace --locked` passed using `C:/tmp/asolaria-kernel-workspace-target-20260706`.
+- Installed Rust targets include `x86_64-unknown-uefi`; `aarch64-unknown-uefi` is still absent and remains a future ARM64 boot-target task.
 
-**Blocking chain:**
-1. Without cargo on acer, §8 row 1 (`cargo test --lib`) cannot run.
-2. Without §8 row 1, §2 wire-progress invariant ("12 of 16 at HALF or FULL") cannot be empirically verified — only inspected.
-3. Without §8 row 2 (`cargo check --workspace`), §4 refactor's "step 8 verify" gate cannot close, which means §4's recommendation (refactor BEFORE tag) is itself blocked.
-
-**Mitigation paths:**
-- **Primary:** install rustup + stable toolchain on acer (operator task; ~15 min on a stable network).
-- **Secondary:** delegate `cargo test --lib` execution to liris (which has the same crate via SMB read-only mirror, but must be augmented with rustup install). Acceptable per `reference_acer_liris_separate_systems.md` (acer ≠ liris ≠ mirror, but cross-vantage execution is allowed for verification under cosign).
-- **Tertiary:** ship without empirical `cargo test --lib` verification, citing inspection-only + triple-runtime-parity test as sufficient evidence. **Concord-Vega recommends against** — the gap between "code reads correct" and "code compiles + tests pass" is exactly where v1.0.0 latent bugs live.
-
-**Concord-Vega position:** until acer task #11 closes, v1.0.0 ship is HOLD. Recommend operator prioritize cargo install in the next cycle window.
+**Boundary:** this closes the cargo/toolchain blocker only. It does not declare `v1.0.0` ship-ready. QEMU/OVMF emulated boot proof is now green via WSL on Acer as of 2026-07-06, but remaining blockers still include Phase-8 drills, cross-vantage parity/cosigns, physical USB boot-menu visibility if required, and the refactor/cosign decision in §4.
 
 ---
-
 ## 10. Open items as of cycle-66
 
 Per recent `:86691` envelope's open-items section and the inputs read for this checklist:
 
-- [ ] **Acer task #11 (cargo install)** — see §9. Critical path. Without it, gates §8 rows 1+2 cannot run.
+- [x] **Acer task #11 (cargo install)** — closed by 2026-07-06 reconciliation; §8 rows 1+2 now have Acer-local measured pass results.
 - [ ] **Operator authorization on §4 microkernel refactor** — pending per `MICROKERNEL_REFACTOR_PLAN.md §"Operator authorization"`. The `:82646` quintuple-auth window covers it, but explicit "execute the refactor" signal is what unblocks step 1.
-- [ ] **Phase-3 wires rows 1, 2, 3, 6, 7, 10, 11** — 7 STUB syscalls must reach at least HALF for v1.0.0 (§2). Asolaria scout is pushing in the recommended order (mmap/munmap → envelope_send/recv → exec → read/write → fork).
-- [ ] **Phase-8 step 155 drill script** — not yet authored. Path: `xe-execute-2026-05-11/canonical-host-swap-drill.mjs` (§3).
-- [ ] **Phase-8 step 156 bench script** — not yet authored. Path: `xe-execute-2026-05-11/10k-envelope-federation-bench.mjs` (§3).
+- [x] **Phase-3 syscall wiring stale-blocker** — reconciled against `PHASE_3_WIRING_STATUS.md`; §2 now records 15 FULL + 1 DIVERGING STUB and Acer-local tests pass.
+- [ ] **Phase-8 step 155 drill script/run** — not yet green from this reconciliation pass. Path: `xe-execute-2026-05-11/canonical-host-swap-drill.mjs` (§3).
+- [ ] **Phase-8 step 156 bench script/run** — not yet green from this reconciliation pass. Path: `xe-execute-2026-05-11/10k-envelope-federation-bench.mjs` (§3).
 - [ ] **Joint PID regex Option-B test corpus** — pending per `JOINT_PID_REGEX_OPTION_B_ACER_ACK.md §"Action items"` row 1 (part_4 from liris+aether). Once it lands, acer must run regex validation against its own emitted envelopes (row 2 of same doc).
 - [ ] **`HookwallCp` + `InfrastructureRouting` concrete shape mapping** — pending aether v3 direct read on acer vantage. Currently both return `Pending` from `classify_subclass` (acceptable for v1.0.0 per §5, but flag for v1.1).
 - [ ] **`KNOWN_DEMOTE_PENDING` rider draft** (contingency if §4 decides AFTER instead of BEFORE) — would freeze rows 14/15/16 of §2 as v1.1 demotion candidates inside the v1.0.0 ABI promise.
@@ -260,6 +254,8 @@ Per recent `:86691` envelope's open-items section and the inputs read for this c
 - [ ] **Falcon PRoot localhost-bound `:4951`** — LAN ingress unresolved per `PHASE_8 §"Lane 2"`. Affects falcon vantage-ack timeliness for §6. Not strictly ship-blocking (falcon can ack via liris sister-handoff fallback) but flag.
 - [ ] **Liris keyboard daemon `:4820`** — per `PHASE_8 §"Lane 3"` fallback note; affects aether request-type lane if liris keyboard daemon dies during ship. Not ship-blocking; operator-manual type is documented fallback.
 - [ ] **Tailscale fallback (step 149)** — DEFERRED status in `PHASE_8 §"Phase-8 deliverable status"`. Not blocking v1.0.0; flag as v1.1 candidate.
+- [x] **QEMU/OVMF emulated boot proof** — WSL Ubuntu on Acer has `qemu-system-x86_64` 8.2.2 and `/usr/share/OVMF/OVMF_CODE_4M.fd`; `asolaria-esp.img` boots under snapshot QEMU to the `ASOLARIA ASI OS . kernel 0.2.0-phase3-scaffold . booting` banner. Receipt: `docs/receipts/ASOLARIA-QEMU-OVMF-BOOT-PROOF-2026-07-06.md`.
+- [ ] **Physical USB boot visibility** — USB Disk 2 is visible but E:/ and F:/ are not mountable and boot-menu visibility is not proven. No USB write/format/boot-entry edit without explicit operator approval.
 - [ ] **Bus-archive canon-alignment grep run** — §5 audit method must produce a zero-hit result at tag time. Currently not run.
 - [ ] **`KNOWN_ROLES` enum extension** — if scout names per `SCOUT_ABILITIES_AND_CONDITIONS.md §6` land in `AGENT_ROSTER_SCHEMA.md` before v1.0.0, the kernel `KNOWN_ROLES` const (`pid/mod.rs` lines 43-52) may need to accept "Concord-Vega" etc. Not strictly required (scouts emit envelopes under their parent vantage's PID), but flag.
 
