@@ -3,14 +3,17 @@
 //! Enumerates the PCI configuration space via the legacy 0xCF8/0xCFC port-I/O
 //! mechanism and prints every present device (vendor:device + class:subclass)
 //! over COM1 serial. This is the "dump the hardware inventory before we trust any
-//! driver" step: on acer (Nitro AN515-52) metal it reveals the Intel RST/VMD
-//! storage controller (8086:282A) and the NVMe behind it; under QEMU it lists the
-//! emulated q35 devices, which proves the code path.
+//! driver" step: on acer (Nitro AN515-52) metal it reveals the PCI-visible Intel
+//! RST/VMD storage controller (8086:282A). NOTE (liris bilateral review): legacy
+//! config enumeration sees the RST *bridge* only — an NVMe REMAPPED behind VMD stays
+//! hidden until a VMD driver walks the VMD domain, so this pass does NOT prove NVMe
+//! visibility. Under QEMU it lists the emulated q35 devices, which proves the code path.
 //!
-//! READ-ONLY BY CONSTRUCTION: this module issues PCI *config reads* only. It never
-//! writes config space, never touches a BAR / MMIO region, and never issues a
-//! storage command. It cannot mutate any disk. It returns to the caller so normal
-//! init proceeds unchanged.
+//! READ-ONLY re DEVICE STATE: this module reads PCI config *data* only. Per the
+//! legacy protocol it writes the config ADDRESS to port 0xCF8 to select which dword
+//! to read from 0xCFC — but it performs NO config-data writes, NO BAR / MMIO writes,
+//! and NO storage commands, so it cannot mutate any disk. It returns to the caller
+//! so normal init proceeds unchanged.
 
 use crate::serial_print;
 
