@@ -1,6 +1,6 @@
 # DeviceIdentity / BootProjection Contract (v0.2 — acer↔liris converging)
 
-**Status:** DESIGN · v0.2 draft · acer proposal incorporating **liris `ACCEPT_WITH_REVISIONS`** (PR #42) + operator **failure-shape identity** + **emitted-shape observation** (`BOOTOBS`/`BOOTSHADOW`) insight. **Still bilateral review — do NOT implement kernel PID-minting until this converges** (coding the wrong identity boundary is the expensive mistake).
+**Status:** DESIGN · v0.2 draft · acer proposal incorporating **liris `ACCEPT_WITH_REVISIONS`** (PR #42) + operator **failure-shape identity** + **emitted-shape observation** (`BOOTOBS`/`BOOTSHADOW`) + **bounded slice GC/train** (`BOOTSLICE`/`BOOTGC`/`BOOTTRAIN`) + **resource-regulator organs** (`BOOTRESOURCE`/`BOOTREGULATE`). **Still bilateral review — do NOT implement kernel PID-minting until this converges** (coding the wrong identity boundary is the expensive mistake).
 **Anchor:** ASOLARIA-FEDERATION-REMAKE-1024 · **Authored:** 2026-07-07 acer-claude-fable5 (pid 8467a937cba309f7)
 **Cross-ref:** `kernel/boot/src/hwinv.rs`, `kernel/docs/DRIVER_MODEL.md`, `kernel/scripts/mint-edit-token-ledger.sh`, path2/qprism harnesses.
 
@@ -73,6 +73,23 @@ BOOTWATCH|target=<part_pid>|watcher=RECALL_SHAPE|verdict=CLASSIFY|seat_guess=ace
 OMNIBITPIXEL|target=<part_pid>|role=pixel_selector_check_unit|body_in_row=0|json=0
 ```
 
+**Bounded slice lifecycle — GC + watcher learning (operator: "GC every 2000 so it doesn't explode"):**
+Every generated slice/message/projection is a bounded row; the body graph must not grow without limit. GC compacts each **2000-slice epoch** into roots (payload dropped/spilled; proofs + feature summaries retained). Watchers train from the retained roots — but **not in the trusted early-boot path.**
+```
+BOOTSLICE|projection=<boot_projection_pid>|seq=<n>|source=<raw_serial|pci|gop|failure|peer>|payload_sha256=<sha256>|feature_sha256=<sha256>|body_in_row=0|json=0
+BOOTGC|projection=<boot_projection_pid>|epoch=<k>|slice_count=2000|payload_policy=<drop|spill>|merkle_root=<sha256>|feature_root=<sha256>|retained=<exemplars+roots+watchverdicts>|json=0
+BOOTTRAIN|projection=<boot_projection_pid>|epoch=<k>|input_root=<feature_root>|watchers=OMNISHANNON,GNN_FORWARD,REVERSE_GNN,HOOKWALL|mode=post_boot_or_userspace|model_mutation=<none_in_trusted_boot|queued>|json=0
+```
+> **RAMP-canon alignment:** GC every 2000 messages is the established Asolaria flow-not-pile-up cadence. **Hard rule:** trusted early boot may observe / hash / summarize / emit rows, but MUST NOT mutate GNN weights or run unbounded training — training **queues** to the post-boot watcher service / userspace with immutable epoch roots as input.
+
+**Resource-regulator organs — CPU/GPU/RAM/VRAM/drive as body parts (operator: the Asolaria task-manager idea):**
+Each CPU / GPU / RAM / VRAM / drive is a `BOOTPART` organ with resource telemetry + a budget; a regulator emits decisions instead of uncontrolled process/device mutation.
+```
+BOOTRESOURCE|projection=<boot_projection_pid>|kind=<CPU|GPU|RAM|VRAM|DRIVE>|part_pid=<part>|util=<pct>|budget=<policy>|json=0
+BOOTREGULATE|target=<part_pid>|policy=<observe_only|defer|throttle|hold>|watchers=OMNISHANNON,GNN_FORWARD,REVERSE_GNN,HOOKWALL|json=0
+```
+> **MEASURED (liris):** `main` already has `servers/host8-serve` `/task-manager.hbp` (view-only, `TASKHDR`/`TASKPROC`, `gpu_less=1`; `omnicpu`/`omnigpu` proposed) + `SUBSTRATE_CONFLICT_MATRIX` budgets (CPU <80% sustained, GPU defers >80%). **Boundary:** the task manager is view-only, **not a kernel governor** — early boot observes + emits resource rows, but throttling / GPU scheduling / model swaps require the driver + cosign gates to exist first.
+
 ## 5. Driver selection — from measured parts/failures, NOT a disk manifest (liris revision #5)
 
 Pre-storage driver selection MUST derive from the **measured `BOOTPART` + `BOOTFAIL` rows** (which exist before any disk is readable), never from reading a manifest file off the disk — chicken-and-egg: you cannot read the disk you have no driver for. The static `ACER-MACHINE-PROFILE-*.hbp` is a **comparison baseline**, not the boot-time selection input.
@@ -96,6 +113,8 @@ Q-PRISM / prime-cylinder (`qprism-3d-slice-harness` 8/8, `path2-two-shadow-recov
 - **MEASURED**: hwinv builds+QEMU-boots; invariant/specific split backed by two boundaries (§6); Q-PRISM watcher harness (omnibit rows, multi-shadow recovery, HOLD, tamper) passes.
 - **NOT literal transistor mapping** (liris): the shadows project **kernel-observable data** (serial / PCI config / memory-map bytes), not silicon. Real transistor/bus-level mapping needs hardware instrumentation (JTAG / bus traces) we do not have — "almost transistor-level" is a metaphor for the projection resolution, not a claim about reading gates.
 - **Never beats Shannon**: slice→shadow→next-slice **re-represents / addresses** (Q-PRISM relocates entropy); it never compresses below `H(X)`. "ULTRA fast" = addressing/recall speed + pre-pixel binary reads, not sub-entropy magic.
+- **No learning in the trusted boot path**: early boot observes/hashes/summarizes/emits only. GNN/Shannon/hookwall **weight mutation + training** happen post-boot / userspace, from immutable `BOOTGC` epoch roots. Unbounded payload retention is forbidden (GC every 2000).
+- **Regulator is observe-only pre-driver**: `BOOTRESOURCE` telemetry + `BOOTREGULATE|policy=observe_only` are allowed early; actual throttle / GPU-schedule / model-swap / process-kill require the relevant driver **and** cosign gates. The current `/task-manager.hbp` is MEASURED view-only, not a governor.
 
 ## 9. Next objects (in order)
 1. **liris review of v0.2** → converge on `BOOTPID` / `BOOTPART` / `BOOTWATCH` / `BOOTFAIL` / `OMNIBITPIXEL` field sets.
