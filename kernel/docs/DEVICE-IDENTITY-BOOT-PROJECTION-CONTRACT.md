@@ -1,6 +1,6 @@
 # DeviceIdentity / BootProjection Contract (v0.2 — acer↔liris converging)
 
-**Status:** DESIGN · v0.3 draft · acer proposal incorporating **liris `ACCEPT_WITH_REVISIONS`** (PR #42) + operator **failure-shape identity** + **emitted-shape observation** (`BOOTOBS`/`BOOTSHADOW`) + **bounded slice GC/train** (`BOOTSLICE`/`BOOTGC`/`BOOTTRAIN`) + **resource-regulator organs** (`BOOTRESOURCE`/`BOOTREGULATE`) + **grounded in the OLD six-body canon** (`colonyAnatomy.js` + 60D decode spec — REUSE, not reinvent). **Still bilateral review — do NOT implement kernel PID-minting until this converges** (coding the wrong identity boundary is the expensive mistake).
+**Status:** DESIGN · v0.3 draft · acer proposal incorporating **liris `ACCEPT_WITH_REVISIONS`** (PR #42) + operator **failure-shape identity** + **emitted-shape observation** (`BOOTOBS`/`BOOTSHADOW`) + **bounded slice GC/train** (`BOOTSLICE`/`BOOTGC`/`BOOTTRAIN`) + **resource-regulator organs** (`BOOTRESOURCE`/`BOOTREGULATE`) + **grounded in the OLD six-body canon** (`colonyAnatomy.js` + 60D decode spec — REUSE, not reinvent) + **anchored at BEHCS-1024 on the Rust 8-byte Host8 substrate**. **Still bilateral review — do NOT implement kernel PID-minting until this converges** (coding the wrong identity boundary is the expensive mistake).
 **Anchor:** ASOLARIA-FEDERATION-REMAKE-1024 · **Authored:** 2026-07-07 acer-claude-fable5 (pid 8467a937cba309f7)
 **Cross-ref:** `kernel/boot/src/hwinv.rs`, `kernel/docs/DRIVER_MODEL.md`, `kernel/scripts/mint-edit-token-ledger.sh`, path2/qprism harnesses.
 
@@ -47,11 +47,20 @@ Per OP-JESSE ("the OLD super-slow amazing system is there still"), acer located 
 
 **Honest gap (reinvent, not reuse):** the old system's "organs of judgment" (GNN scorer/oracle) were **stubs/hashes**; D48/D49 + the 60D runtime codec were flagged **absent**; `taskManager` was marked "missing"; live cross-host handshake UNVERIFIED. The judgment/GNN organs (`BOOTWATCH` verdicts beyond PASS/HOLD) are the real build, not a port.
 
+## 2c. BEHCS lineage + the Host8 substrate — where this contract sits
+
+Two **orthogonal** axes (grounded: `C:/HyperBEHCS/AGENT.md` stack line + the 60D decode spec — *"each PID a 60-tuple interned to a `u64` Handle"*):
+
+- **Encoding-set axis** (alphabet / dimensionality): `LX/IX` (unorganized tuple verb-nouns, prefix recognition) → **BEHCS-64** (origin — the Brown-Hilbert, catalog-compacted PID that *replaced* LX/IX) → **BEHCS-256** → **BEHCS-1024** *(this contract)* → **HyperBEHCS** (60D, top set). *(The `256→1024→Hyper` stack line drops the 64, which is why HyperBEHCS is mislabeled the "third set" — counting from 64 it's the fourth rung.)*
+- **Runtime-substrate axis** (speed): `Node / V8` (the old "super-slow amazing" `.cjs` host, `hyperbehcs-core.cjs`) → **Rust 8-byte Host8** (a BEHCS PID's 60-tuple interned to a `u64` = **8 bytes**, routed natively — no JSON, no V8). *"old node decodes new rust."*
+
+**This contract = BEHCS-1024 semantics on the Rust Host8 substrate.** `device_pid` is a BEHCS-1024 60-tuple over the D-axes (§2b), interned to an 8-byte `u64` Host8 handle for fast recognition/routing — the LX/IX colony prefix is now just the **D34 colony axis** inside that tuple, not a standalone tag. It auto-pipes up toward **HyperBEHCS-on-Metal** (`AGENT.md` goal) = the intersection of the top encoding set + the fast Rust host on bare metal = the OS-on-metal target.
+
 ## 3. IDs — full proof + short display (liris revision #2)
 
 Every PID carries BOTH:
 - `*_pid_full=<sha256>` — the proof ID (full, for verification + edit-token chaining).
-- `*_pid=<sha16>` — short host8/display ID (for routing + cross-reference).
+- `*_pid=<sha16>` — short host8 display ID (routing + cross-reference); on the **Rust Host8 substrate** the BEHCS 60-tuple interns to an 8-byte `u64` handle = the native routing key (no JSON/V8).
 
 `device_pid_full = sha256(canonical STABLE-hardware tuple)`; `device_pid = ` its first 16 hex.
 
