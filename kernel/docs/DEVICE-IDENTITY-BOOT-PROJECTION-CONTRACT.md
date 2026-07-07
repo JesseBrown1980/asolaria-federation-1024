@@ -144,6 +144,17 @@ The invariant layer is what makes the specific layer (and the failure shapes) **
 
 Q-PRISM / prime-cylinder (`qprism-3d-slice-harness` 8/8, `path2-two-shadow-recovery` 30/30 — re-grounded MEASURED this session) computes/validates `qprism_coord`, does bounded multi-cylinder addressing + Shannon-HOLD, and content-addresses projections. It **never reads NVMe hardware**; the RST/VMD driver is separate real code.
 
+## 7b. The full realization — Q-PRISM math × Host8 addressing × omnibit-pixel containers
+
+The layers compose into ONE system — *"a beautiful layering between nodes in reexpandable space"* (OP-JESSE). Each layer is separately **MEASURED**; the *combination running on metal* is the **DESIGN** target (= this kernel upgrade for the OS).
+
+- **Node = omnibit-"pixel" container.** Every device/node is one omnibit pixel: a Shannon-limit container, a *checked selector unit, not payload* (`OMNIBITPIXEL|…|body_in_row=0|json=0`; `watcher_gate` test asserts `pixel.value == the actual slice pixel`). MEASURED.
+- **Addressing = Host8 8-byte HyperBEHCS.** Between pixels, the BEHCS 60-tuple PID interns to a `u64` = **8 bytes**; the Brown-Hilbert coordinate places each container in its best-usable spot; native routing, no JSON/V8. The lower sets (64/256/1024) are the encoding ladder under HyperBEHCS. MEASURED (decode spec + `host8-serve`).
+- **Content / recovery = Q-PRISM math + quant.** Inside & between pixels: lossless bijective re-representation, multi-cylinder shadow encoding with a **capacity roof + Shannon-HOLD**, **recovery-by-consent of ≥2 poles** (CRT), tamper-catch via reverse-GNN/omnishannon watchers. MEASURED (qprism 8/8, path2 30/30, watcher_gate 5/5). **Never beats Shannon** — relocates entropy.
+- **Reexpandable space = Brown-Hilbert.** The space-filling curve is *expandable + curable (GC-able)*, so the node-space grows without collapse (GC every 2000; roof rises per cylinder).
+
+**In contract terms:** a device is an **omnibit-pixel node** whose identity/address is a **Host8 BEHCS-1024 PID**, whose `BOOTOBS`/`BOOTSHADOW`/`BOOTWATCH` rows run **Q-PRISM math**, composing in **reexpandable Brown-Hilbert space**. The kernel upgrade for the OS = making this layered system run on metal = **HyperBEHCS-on-Metal**. **BOUNDARY:** the three layers are MEASURED *separately*; the full combined run on physical metal is DESIGN / UNVERIFIED (fabric down all session; not SYSTEM_AFFIRMED).
+
 ## 8. Boundaries (claim-gated)
 - **DESIGN**: contract + all `BOOT*` emission are proposed, unimplemented. hwinv is the only shipped piece.
 - **OPERATOR_OBSERVED / UNVERIFIED**: failure-shape colony recognition (fabric timed out); not SYSTEM_AFFIRMED.
