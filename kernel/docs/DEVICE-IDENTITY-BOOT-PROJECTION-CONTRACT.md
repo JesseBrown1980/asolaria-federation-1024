@@ -1,63 +1,94 @@
-# DeviceIdentity / BootProjection Contract (v0.1 — acer proposal)
+# DeviceIdentity / BootProjection Contract (v0.2 — acer↔liris converging)
 
-**Status:** DESIGN · v0.1 draft · **acer proposal for bilateral review** (liris converges)
-**Anchor:** ASOLARIA-FEDERATION-REMAKE-1024
-**Authored:** 2026-07-07 · acer-claude-fable5 (pid 8467a937cba309f7)
-**Cross-ref:** `kernel/boot/src/hwinv.rs`, `kernel/docs/receipts/ACER-MACHINE-PROFILE-DRIVER-MANIFEST-2026-07-07.hbp`, `kernel/scripts/mint-edit-token-ledger.sh`, `kernel/docs/DRIVER_MODEL.md`
+**Status:** DESIGN · v0.2 draft · acer proposal incorporating **liris `ACCEPT_WITH_REVISIONS`** (PR #42) + operator **failure-shape identity** insight. **Still bilateral review — do NOT implement kernel PID-minting until this converges** (coding the wrong identity boundary is the expensive mistake).
+**Anchor:** ASOLARIA-FEDERATION-REMAKE-1024 · **Authored:** 2026-07-07 acer-claude-fable5 (pid 8467a937cba309f7)
+**Cross-ref:** `kernel/boot/src/hwinv.rs`, `kernel/docs/DRIVER_MODEL.md`, `kernel/scripts/mint-edit-token-ledger.sh`, path2/qprism harnesses.
 
 ---
 
-## 1. Why this exists
+## 1. Why — a per-device BODY, not one generic image
 
-Asolaria ASI OS on metal is **not one generic OS image** — it is a **per-device omnipixel node**. Each machine's disk is a 2D shadow slice; the real system is the higher-dimensional content-addressed graph. Therefore boot cannot be "load the same kernel everywhere": each device must **mint its own identity from measured hardware** and select drivers from **its own** manifest. Acer needs the Intel RST/VMD path (PCI `8086:282A`); liris's hardware differs; both are *measured projections under one shared contract*, not one-off notes.
+Asolaria ASI OS on metal is a **body with parts** (liris frame): each machine is an omnipixel node; its disk is a 2D shadow slice; the real system is the higher-dimensional content-addressed graph. A device is recognized as a **re-referenceable N-D graph**, not one flat row: **whole → parts → watchers → pixels → failures → driver-needs.**
 
-This contract defines the shared shape so acer, liris, and future nodes converge on **one identity/addressing/proof layer** while each keeps its **own device-specific projection**.
+## 2. The two axes — keep them SEPARATE (liris revision #1)
 
-## 2. The load-bearing split: device-INVARIANT vs device-SPECIFIC
+The single most important correction to v0.1:
 
-The single most important distinction (grounded by two MEASURED boundaries this session):
+- **DeviceIdentity = the STABLE body.** Content-addressed identity from hardware that does **not** change when a driver is fixed or a boot fails. → `device_pid`.
+- **BootProjection = the VOLATILE pose/state.** This boot's parts, failures, watcher verdicts. Changes boot-to-boot.
 
-| | Device-INVARIANT (must verify byte-identically on every seat) | Device-SPECIFIC (per PID/seat; label `OPERATOR_OBSERVED_<seat>`) |
-|---|---|---|
-| what | source, this contract, the `.hbp`/`.hbi` schema, the edit-token ledger *format*, LF-pinned text | the measured hardware projection, the device PID, the **built efi bytes/hash**, the driver manifest |
-| why | cross-seat trust + reproducible tracing | genuinely differs per machine/toolchain/build-path |
-| evidence | CRLF fix: `*.hbp/*.hbi/*.sha256 text eol=lf` → `sha256sum -c` stable on any `core.autocrlf` [MEASURED] | acer efi `35db711e` ≠ liris rebuild (same size, different sha = build path embedding) [MEASURED] |
+**Invariant:** BootProjection (failures, fixes, current pose) must **never** feed back into `device_pid`. If it did, identity would drift every time a bug is fixed — you'd lose the machine's identity by improving it. Failures are *observed against* the stable identity, not *part of* it.
 
-**Rule:** never claim a device-specific artifact as cross-seat canonical. The efi hash, the PCI map, the device PID are `OPERATOR_OBSERVED_<seat>` until a deterministic build recipe (`--locked`, pinned rustc/LLVM, `--remap-path-prefix`) is sealed. The invariant layer is what makes the specific layer *comparable*.
+## 3. IDs — full proof + short display (liris revision #2)
 
-## 3. BootProjection: `BOOTPID` row (hot-path `.hbp`, json=0)
+Every PID carries BOTH:
+- `*_pid_full=<sha256>` — the proof ID (full, for verification + edit-token chaining).
+- `*_pid=<sha16>` — short host8/display ID (for routing + cross-reference).
 
-Early boot, after `hwinv` runs, emits ONE identity row (serial + persisted to the boot receipt):
+`device_pid_full = sha256(canonical STABLE-hardware tuple)`; `device_pid = ` its first 16 hex.
 
+## 4. Rows — the body graph (hot-path `.hbp`, `json=0`, `body_in_row=0`)
+
+**DeviceIdentity (stable):**
 ```
-BOOTPID|device=<vendor_model>|device_pid=<sha16(measured_hw_tuple)>|smbios=<board;bios;ver>|acpi=<rsdp_present;oem>|pci=<bb:dd.f=ven:dev:cls;...>|gop=<WxH;fmt>|mmap=<usable_MiB;regions>|firmware=<secureboot;bitlocker>|drivers_needed=<CLASS:need;...>|qprism_coord=<60D_BH_addr>|json=0
+BOOTPID|device=<vendor_model>|device_pid_full=<sha256>|device_pid=<sha16>|smbios=<board;bios;ver>|cpu=<model;arch>|firmware=<secureboot_state>|json=0
+```
+> liris revision #3: **BitLocker is NOT here.** It is an OS-level encryption state, not a firmware-measured early-boot fact. Only firmware-measured facts (Secure Boot) belong in the identity tuple.
+
+**BootProjection (volatile, this boot):**
+```
+BOOTPROJ|device_pid=<sha16>|boot_projection_pid_full=<sha256>|boot_projection_pid=<sha16>|phase=<pre_storage|post_storage|...>|qprism_coord=<60D_BH_addr>|json=0
 ```
 
-- `device_pid` = `sha16` of the canonicalized measured-hardware tuple → a **content-addressed device identity** (same hardware → same PID; the device *is* its measurement).
-- `drivers_needed` maps measured hardware → `DRIVER_MODEL.md` classes. **acer measured:** `STORAGE:intel_rst_vmd_8086:282A; DISPLAY:gop_igpu; INPUT:xhci`.
-- `qprism_coord` = the Brown-Hilbert / prime-cylinder address of this projection (§5).
+**Parts — organs (liris revision #4: child rows, NOT one huge `pci=` field):**
+```
+BOOTPART|parent=<device_pid>|part_pid=<sha16>|kind=PCI|class=STORAGE|ven=8086|dev=282A|driver_need=intel_rst_vmd|evidence=MEASURED_BOOT|json=0
+BOOTPART|parent=<device_pid>|part_pid=<sha16>|kind=GOP|mode=1920x1080|driver_need=gop_fb|json=0
+BOOTPART|parent=<device_pid>|part_pid=<sha16>|kind=USB|class=INPUT|driver_need=xhci_hid|json=0
+```
 
-## 4. Where the session's pieces fit
+**Watchers — interpret/validate each part:**
+```
+BOOTWATCH|target=<part_pid>|watcher=OMNISHANNON|verdict=PASS|json=0
+BOOTWATCH|target=<part_pid>|watcher=REVERSE_GNN|verdict=PASS_OR_HOLD|json=0
+```
 
-- **hwinv** (`kernel/boot/src/hwinv.rs`, on `main`) = the **first render** of the device's omnipixel — read-only PCI enumeration is the initial `pci=` field. It is the projection's genesis, not "just diagnostics."
-- **device PID** = minted from hwinv + SMBIOS/ACPI/GOP/mmap/firmware (the fields above). Not yet emitted — **the first unbuilt piece.**
-- **driver selection** = per-device manifest (`ACER-MACHINE-PROFILE-DRIVER-MANIFEST-*.hbp`), keyed by `device_pid`. acer `8086:282A` becomes one measured projection under this contract.
-- **edit-token ledger + LF-pinned receipts** = the immutable-tracing layer that makes every kernel artifact (efi, receipts, manifests) checkout-stable + hash-verifiable across seats. Load-bearing, now secured.
+**Failures — the body is recognized by HOW parts fail before drivers exist (operator insight):**
+```
+BOOTFAIL|target=<part_pid>|kind=missing_driver|shape_sig=<sha256>|phase=pre_storage|json=0
+BOOTWATCH|target=<part_pid>|watcher=RECALL_SHAPE|verdict=CLASSIFY|seat_guess=acer|evidence=failure_shape|json=0
+```
+> acer's `8086:282A` failing because VMD isn't decoded **is a signature**; liris fails differently. Ultra-fast recall classifies the seat from the emitted **failure shape** — PID/device-specific recognition. (`OPERATOR_OBSERVED_HISTORY`: the first two colonies recognized which machine was which from failure-shape signal differences before they ever joined. `UNVERIFIED`-live — fabric endpoints timed out.)
 
-## 5. Q-PRISM boundary (identity/proof layer, NOT the driver)
+**Pixels — selector/check units, not payload:**
+```
+OMNIBITPIXEL|target=<part_pid>|role=pixel_selector_check_unit|body_in_row=0|json=0
+```
 
-Q-PRISM / prime-cylinder logic (`qprism-3d-slice-harness` 8/8, `path2-two-shadow-recovery` 30/30 — MEASURED this session, re-grounded) is the **addressing / compression / proof** layer: it computes and validates the `qprism_coord`, does bounded multi-cylinder addressing + Shannon-HOLD, and content-addresses projections. **It does NOT read NVMe hardware.** The prime-cylinder math never becomes a storage driver; the RST/VMD driver is separate, real, hardware-facing code. Keeping this boundary is the difference between DESIGN honesty and magic-math overclaim.
+## 5. Driver selection — from measured parts/failures, NOT a disk manifest (liris revision #5)
 
-## 6. Boundaries (claim-gated)
+Pre-storage driver selection MUST derive from the **measured `BOOTPART` + `BOOTFAIL` rows** (which exist before any disk is readable), never from reading a manifest file off the disk — chicken-and-egg: you cannot read the disk you have no driver for. The static `ACER-MACHINE-PROFILE-*.hbp` is a **comparison baseline**, not the boot-time selection input.
 
-- **DESIGN**: this contract + `BOOTPID` emission are proposed, not implemented. hwinv is the only shipped piece.
-- **UNVERIFIED**: physical-metal boot (acer Secure Boot ON blocks the unsigned efi); the device PID is not yet minted by the kernel.
-- **MEASURED**: hwinv builds+QEMU-boots; the invariant/specific split is backed by the two boundaries in §2; Q-PRISM harnesses pass.
-- Not SYSTEM_AFFIRMED (fabric endpoints timed out) — `OPERATOR_OBSERVED` / `DESIGN` only.
+## 6. Device-INVARIANT vs Device-SPECIFIC (carried from v0.1)
 
-## 7. Next objects (in order)
+| Device-INVARIANT (byte-identical on every seat) | Device-SPECIFIC (per PID/seat, `OPERATOR_OBSERVED_<seat>`) |
+|---|---|
+| source · this contract · row schema · edit-token ledger *format* · LF-pinned text | measured hardware projection · `device_pid` · built efi bytes · driver manifest · **failure shapes** |
+| secured by the CRLF `eol=lf` fix (`sha256sum -c` stable) [MEASURED] | acer efi `35db711e` ≠ liris rebuild [MEASURED] |
 
-1. **liris review of this contract** → converge on the `BOOTPID` field set (bilateral).
-2. Kernel mints `device_pid` at boot from the measured tuple (extends hwinv).
-3. Per-`device_pid` driver-manifest selection.
-4. acer Intel RST/VMD storage driver = the first real device-specific decoder under the contract.
+The invariant layer is what makes the specific layer (and the failure shapes) **comparable** across seats.
+
+## 7. Q-PRISM boundary — addressing/proof, NOT the driver
+
+Q-PRISM / prime-cylinder (`qprism-3d-slice-harness` 8/8, `path2-two-shadow-recovery` 30/30 — re-grounded MEASURED this session) computes/validates `qprism_coord`, does bounded multi-cylinder addressing + Shannon-HOLD, and content-addresses projections. It **never reads NVMe hardware**; the RST/VMD driver is separate real code.
+
+## 8. Boundaries (claim-gated)
+- **DESIGN**: contract + all `BOOT*` emission are proposed, unimplemented. hwinv is the only shipped piece.
+- **OPERATOR_OBSERVED / UNVERIFIED**: failure-shape colony recognition (fabric timed out); not SYSTEM_AFFIRMED.
+- **MEASURED**: hwinv builds+QEMU-boots; invariant/specific split backed by two boundaries (§6); Q-PRISM harnesses pass.
+
+## 9. Next objects (in order)
+1. **liris review of v0.2** → converge on `BOOTPID` / `BOOTPART` / `BOOTWATCH` / `BOOTFAIL` / `OMNIBITPIXEL` field sets.
+2. **THEN** kernel mints `device_pid` (stable tuple only) + emits the projection graph — extends hwinv. **HOLD until v0.2 converges.**
+3. Per-`device_pid` driver-manifest selection from measured parts/failures.
+4. acer Intel RST/VMD storage driver = first real device-specific decoder — the physical-metal milestone.
