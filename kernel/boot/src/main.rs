@@ -275,7 +275,7 @@ unsafe fn serial_print(msg: &[u8]) {
 
 /// UEFI application entry point. The `x86_64-unknown-uefi` target links against the `efi_main`
 /// symbol (`/entry:efi_main /subsystem:efi_application`); firmware calls it with the image handle
-/// + system table. We print the boot banner via ConOut, bring up the heap, and hand off to the
+/// and system table. We print the boot banner via ConOut, bring up the heap, and hand off to the
 /// kernel init (envelope-REPL), which diverges.
 ///
 /// HONEST next step (`frame_alloc` v0.2): the heap is a fixed 16 KiB static `BumpAllocator`. A
