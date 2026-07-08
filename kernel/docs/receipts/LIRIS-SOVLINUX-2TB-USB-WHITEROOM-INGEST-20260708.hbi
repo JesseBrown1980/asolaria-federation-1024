@@ -1,0 +1,9 @@
+HBI|id=LIRIS_SOVLINUX_2TB_USB_WHITEROOM_INGEST_20260708|hbp=sovlinux-2tb-usb-white-room-ingest-20260708.hbp|kind=white_room_ingest_index|json=0
+INDEX|row=WHITEROOMINGEST|purpose=metadata_hash_pointer_ingest|target=omniwhite-room|json=0
+INDEX|row=SYSTEM_AFFIRMED|surfaces=asolaria_fabric_substrates,asolaria_fabric_access_tier_matrix|fallback_stale=1|json=0
+INDEX|row=MEASURED_USB_DEVICE|disk=2|model=General_UDisk_USB_Device|size_bytes=2097150289920|json=0
+INDEX|row=MEASURED_SCAN|digest=cac3cf0a22327c6b323c11298d049d4ae7f45079d341a0579b03a1522329d5be|status=READONLY_SCAN_COMPLETE|json=0
+INDEX|row=OUTPUT_HASH|count=4|paths=reports_json,reports_md,data_recovery_ndjson,state_json|json=0
+INDEX|row=BOOT_PREVIEW_HASH|count=4|paths=BOOT-CRITICAL.md,boot.js,sovereignty-boot.js,runtime.js|json=0
+INDEX|row=OFFICECLI_READY_POINTER|receipt_sha=14127143a3420febc649023b9f7adc44e766912ddef4a1c3b565e987795c1ccb|free=1|installed=0|json=0
+INDEX|row=BOUNDARY|usb_write=0|runtime_launch=0|raw_usb_content_copied=0|json=0
