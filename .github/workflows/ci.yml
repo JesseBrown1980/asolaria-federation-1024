@@ -28,6 +28,7 @@ jobs:
         with:
           components: rustfmt, clippy
           toolchain: "1.81"
+          targets: x86_64-unknown-uefi
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -43,11 +44,39 @@ jobs:
         run: cargo check --workspace --all-features
       - name: cargo check (kernel sub-workspace)
         run: cargo check --manifest-path kernel/Cargo.toml --workspace
-      - name: cargo test (kernel agent-runtime behavior)
-        run: cargo test --manifest-path kernel/Cargo.toml -p asolaria-kernel-core agent_runtime
+      - name: cargo test (kernel core full suite)
+        run: cargo test --manifest-path kernel/Cargo.toml -p asolaria-kernel-core --all-targets -- --test-threads=1
+      - name: cargo clippy (kernel core)
+        run: cargo clippy --manifest-path kernel/Cargo.toml -p asolaria-kernel-core --all-targets -- -D warnings
+      - name: cargo build (kernel UEFI release)
+        run: cargo build --manifest-path kernel/Cargo.toml --release --target x86_64-unknown-uefi --bin asolaria-os
+      - name: inspect kernel UEFI PE/COFF artifact
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import struct
+
+          artifact = Path("kernel/target/x86_64-unknown-uefi/release/asolaria-os.efi")
+          data = artifact.read_bytes()
+          if data[:2] != b"MZ":
+              raise SystemExit("artifact is not MZ/PE")
+          pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+          if data[pe_offset:pe_offset + 4] != b"PE\0\0":
+              raise SystemExit("artifact is missing PE signature")
+          machine = struct.unpack_from("<H", data, pe_offset + 4)[0]
+          optional_start = pe_offset + 24
+          optional_magic = struct.unpack_from("<H", data, optional_start)[0]
+          subsystem = struct.unpack_from("<H", data, optional_start + 68)[0]
+          if (machine, optional_magic, subsystem) != (0x8664, 0x20B, 10):
+              raise SystemExit(
+                  f"unexpected PE fields: machine=0x{machine:04x} "
+                  f"magic=0x{optional_magic:04x} subsystem={subsystem}"
+              )
+          print(f"OK UEFI PE/COFF bytes={len(data)} sha256={hashlib.sha256(data).hexdigest()}")
+          PY
       - name: cargo clippy
         run: cargo clippy --workspace --all-features -- -D warnings
-
   node-check:
     name: node lint + type-check
     runs-on: ubuntu-latest
