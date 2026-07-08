@@ -1,0 +1,8 @@
+DEVTIME60DPROOF|kind=device+time_60d_boot_proof|seat=ACER-CLAUDE-FABLE5|pid=8467a937cba309f7|date=2026-07-08|toolchain=rustc-1.81|target=x86_64-unknown-uefi|gate=fmt+clippy_D_warnings+build+qemu_ALL_GREEN|e=0|json=0
+BOOTPID|device_pid=d0162de451e51b30|device_pid_full=d0162de451e51b30057822213aa3187125480e0f30e4b2f69c2c9ac14ba8b4e9|hw_tuple_pid_full=22063f895e14fa5f39f98ce10ce24bfe62c43a66f40a7ec9b20aa2058bbf06a9|dims=60|derived_from=60d_coordinate|coord_prefix=979.310.131.995.978.505|rst_vmd=0|storage=1|colony=acer|e=0|json=0
+BOOTTIME|utc=2026-07-08T13:24:48Z|tsc=10722597973|src=cmos_rtc_0x70_0x71+rdtsc|e=0|json=0
+BOOTPROJ|boot_pid=74d289e1bdbefd66|device_pid=d0162de451e51b30|utc=2026-07-08T13:24:48Z|volatile=1|stable_ref=device_pid|model=device+time|e=0|json=0
+BOOTDRIVER|driver=intel-rst-vmd|match=8086:282A|status_on_q35=NOT_APPLICABLE|on_acer_metal=GATED_MATCH|boot_pid=74d289e1bdbefd66|writes=0|e=0|json=0
+LIRISFIX|critique=device_pid_was_raw_hw_sha_with_60d_bolted_beside|applied=device_pid_now=sha256(60d_coord)[..8]|raw_hw_sha=demoted_to_hw_tuple_pid_full_proof|source=liris_bilateral_review_2026-07-08|json=0
+MODULES|hwinv.rs=pci_enum+device_pid_60d_derived|rtc.rs=cmos_rtc+tsc_BOOTTIME|bootproj.rs=device+time_boot_pid_BOOTPROJ|driver_rst_vmd.rs=device_gated_time_stamped_scaffold|wired=main.rs_efi_main|json=0
+BOUNDARY|measured=fmt+clippy+build+qemu_q35_boots+emits_4_rows|design=not_on_physical_metal(rst_vmd=1_pending_operator_boot)|honest_60d_gap=coord=project_60d(hw)_sha_projection_NOT_YET_the_core_mint_behcs1024_pid_60(which_liris_confirms_is_still_the_STRING_minter_per_KERNEL_TARGETS_Step27)|when_step27_lands=device_pid_should_use_that|e0=emits_not_registers|json=0

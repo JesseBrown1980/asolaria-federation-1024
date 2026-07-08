@@ -50,7 +50,7 @@ unsafe fn cfg_read32(bus: u8, dev: u8, func: u8, off: u8) -> u32 {
 
 const HEX: &[u8; 16] = b"0123456789abcdef";
 
-fn put_hex8(buf: &mut [u8], i: usize, v: u8) -> usize {
+pub(crate) fn put_hex8(buf: &mut [u8], i: usize, v: u8) -> usize {
     buf[i] = HEX[(v >> 4) as usize];
     buf[i + 1] = HEX[(v & 0x0F) as usize];
     i + 2
@@ -61,7 +61,7 @@ fn put_hex16(buf: &mut [u8], i: usize, v: u16) -> usize {
     put_hex8(buf, i, (v & 0xFF) as u8)
 }
 
-fn put_bytes(buf: &mut [u8], i: usize, s: &[u8]) -> usize {
+pub(crate) fn put_bytes(buf: &mut [u8], i: usize, s: &[u8]) -> usize {
     let mut i = i;
     for &c in s {
         buf[i] = c;
@@ -144,7 +144,7 @@ impl HwTuple {
 // ---------------------------------------------------------------- sha256 (no_std, no-alloc)
 /// Minimal fixed-buffer sha256. Input is bounded by `TUPLE_CAP`; the padded message fits
 /// in a 640-byte stack buffer, so no heap is used (the boot heap is a 16 KiB bump arena).
-fn sha256(data: &[u8]) -> [u8; 32] {
+pub(crate) fn sha256(data: &[u8]) -> [u8; 32] {
     const K: [u32; 64] = [
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
         0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
@@ -231,19 +231,61 @@ fn sha256(data: &[u8]) -> [u8; 32] {
     out
 }
 
+/// Project the hardware tuple into a 60D Brown-Hilbert coordinate: 60 × 10-bit glyphs,
+/// counter-salted sha256 — the same 60-tuple frame the kernel's BEHCS-1024 PIDs use
+/// (`envelope`/`spawn_gate`/`syscall`/`hookwall`). Makes `dims=60` a real coordinate. No alloc.
+fn project_60d(tuple: &[u8]) -> [u16; 60] {
+    let mut sel = [0u16; 60];
+    let mut buf = [0u8; TUPLE_CAP + 4];
+    let n = if tuple.len() > TUPLE_CAP {
+        TUPLE_CAP
+    } else {
+        tuple.len()
+    };
+    buf[..n].copy_from_slice(&tuple[..n]);
+    let (mut i, mut counter) = (0usize, 0u32);
+    while i < 60 {
+        buf[n..n + 4].copy_from_slice(&counter.to_be_bytes());
+        let h = sha256(&buf[..n + 4]);
+        let mut j = 0;
+        while j + 1 < 32 && i < 60 {
+            sel[i] = (((h[j] as u16) << 8) | h[j + 1] as u16) & 0x03FF;
+            i += 1;
+            j += 2;
+        }
+        counter += 1;
+    }
+    sel
+}
+
 /// Mint the `device_pid` from the accumulated tuple and emit the `BOOTPID` hot-path row.
 /// `device_pid` = sha256(tuple)[..8] as hex16 (the 8-byte Host8 handle); the full sha256
 /// is the proof id. E=0: emitted, not fired; no live-fabric registration, no seal.
-fn emit_device_pid(t: &HwTuple) {
-    let digest = sha256(&t.buf[..t.len]);
-    let mut row = [0u8; 256];
+fn emit_device_pid(t: &HwTuple) -> [u8; 32] {
+    // Raw hardware-tuple sha256 — kept as the PROOF of the underlying hardware.
+    let hw_digest = sha256(&t.buf[..t.len]);
+    // 60D Brown-Hilbert coordinate of the hardware tuple. device_pid IS the intern of THIS
+    // coordinate (sha256(coord)[..8]) — identity derived FROM the 60D frame, not a raw-tuple sha
+    // with a 60D field bolted beside it (liris bilateral review 2026-07-08).
+    let coord = project_60d(&t.buf[..t.len]);
+    let mut coord_bytes = [0u8; 120];
+    for (k, g) in coord.iter().enumerate() {
+        coord_bytes[k * 2] = (g >> 8) as u8;
+        coord_bytes[k * 2 + 1] = (g & 0xFF) as u8;
+    }
+    let device_digest = sha256(&coord_bytes);
+    let mut row = [0u8; 448];
     let mut i = put_bytes(&mut row, 0, b"  BOOTPID|device_pid=");
-    for &byte in &digest[..8] {
-        i = put_hex8(&mut row, i, byte); // hex16 = 8-byte Host8 handle
+    for &byte in &device_digest[..8] {
+        i = put_hex8(&mut row, i, byte); // device_pid = intern of the 60D coordinate
     }
     i = put_bytes(&mut row, i, b"|device_pid_full=");
-    for &byte in &digest {
-        i = put_hex8(&mut row, i, byte); // full sha256 hex64 (proof id)
+    for &byte in &device_digest {
+        i = put_hex8(&mut row, i, byte); // full sha256 of the 60D coordinate
+    }
+    i = put_bytes(&mut row, i, b"|hw_tuple_pid_full=");
+    for &byte in &hw_digest {
+        i = put_hex8(&mut row, i, byte); // raw hardware-tuple sha256 = the proof
     }
     i = put_bytes(&mut row, i, b"|hw_devices=");
     i = put_u32(&mut row, i, t.count);
@@ -256,20 +298,36 @@ fn emit_device_pid(t: &HwTuple) {
     i = put_bytes(
         &mut row,
         i,
-        b"|colony=acer|behcs=1024|dims=60|e=0|fire=0|json=0\r\n",
+        b"|colony=acer|behcs=1024|dims=60|derived_from=60d_coordinate|coord_prefix=",
     );
+    for (k, g) in coord.iter().take(6).enumerate() {
+        if k > 0 {
+            row[i] = b'.';
+            i += 1;
+        }
+        i = put_u32(&mut row, i, *g as u32);
+    }
+    i = put_bytes(&mut row, i, b"|e=0|fire=0|json=0\r\n");
     // SAFETY: serial_print writes COM1 via port I/O; no memory or device-state hazard.
     unsafe {
         serial_print(&row[..i]);
     }
+    device_digest
+}
+
+/// Summary handed to the boot orchestrator: the device_pid digest + the RST/VMD gate, so
+/// the time / projection / driver stages key off the SAME enumeration.
+pub(crate) struct HwSummary {
+    pub device_digest: [u8; 32],
+    pub rst_vmd: bool,
 }
 
 /// Enumerate PCI config space, print each present device over serial, and mint the
-/// `device_pid`. Read-only re device state; E=0.
+/// `device_pid`. Read-only re device state; E=0. Returns the [`HwSummary`].
 ///
 /// Caps at 64 device-functions so a pathological bus map can't flood serial; acer
 /// presents well under that. The `device_pid` is minted from whatever was enumerated.
-pub unsafe fn pci_scan() {
+pub unsafe fn pci_scan() -> HwSummary {
     serial_print(b"  hwinv . PCI enumeration (0xCF8/0xCFC, read-only)\r\n");
     let mut tuple = HwTuple::new();
     for bus in 0u16..=255 {
@@ -320,12 +378,19 @@ pub unsafe fn pci_scan() {
                 tuple.push(vendor, device, class, subclass);
                 if tuple.count >= 64 {
                     serial_print(b"  hwinv . (capped at 64 device-functions)\r\n");
-                    emit_device_pid(&tuple);
-                    return;
+                    let device_digest = emit_device_pid(&tuple);
+                    return HwSummary {
+                        device_digest,
+                        rst_vmd: tuple.rst_vmd,
+                    };
                 }
             }
         }
     }
     serial_print(b"  hwinv . PCI scan complete\r\n");
-    emit_device_pid(&tuple);
+    let device_digest = emit_device_pid(&tuple);
+    HwSummary {
+        device_digest,
+        rst_vmd: tuple.rst_vmd,
+    }
 }
