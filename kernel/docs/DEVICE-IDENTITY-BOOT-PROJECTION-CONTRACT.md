@@ -1,6 +1,6 @@
 # DeviceIdentity / BootProjection Contract (v0.2 — acer↔liris converging)
 
-**Status:** DESIGN · v0.3 draft · acer proposal incorporating **liris `ACCEPT_WITH_REVISIONS`** (PR #42) + operator **failure-shape identity** + **emitted-shape observation** (`BOOTOBS`/`BOOTSHADOW`) + **bounded slice GC/train** (`BOOTSLICE`/`BOOTGC`/`BOOTTRAIN`) + **resource-regulator organs** (`BOOTRESOURCE`/`BOOTREGULATE`) + **grounded in the OLD six-body canon** (`colonyAnatomy.js` + 60D decode spec — REUSE, not reinvent) + **anchored at BEHCS-1024 on the Rust 8-byte Host8 substrate**. **Still bilateral review — do NOT implement kernel PID-minting until this converges** (coding the wrong identity boundary is the expensive mistake).
+**Status:** DESIGN · v0.3 draft · acer proposal incorporating **liris `ACCEPT_WITH_REVISIONS`** (PR #42) + operator **failure-shape identity** + **emitted-shape observation** (`BOOTOBS`/`BOOTSHADOW`) + **bounded slice GC/train** (`BOOTSLICE`/`BOOTGC`/`BOOTTRAIN`) + **resource-regulator organs** (`BOOTRESOURCE`/`BOOTREGULATE`) + **grounded in the OLD six-body canon** (`colonyAnatomy.js` + 60D decode spec — REUSE, not reinvent) + **anchored at BEHCS-1024 on the Rust 8-byte Host8 substrate** + **Fischer judgment brain** (`BOOTJUDGE`, MEASURED 9/9) + canonical chain + GAC authority ladder. Companion: `ASI-OS-ON-METAL-KERNEL-BUILD-DESIGN.md`. **Still bilateral review — do NOT implement kernel PID-minting until this converges** (coding the wrong identity boundary is the expensive mistake).
 **Anchor:** ASOLARIA-FEDERATION-REMAKE-1024 · **Authored:** 2026-07-07 acer-claude-fable5 (pid 8467a937cba309f7)
 **Cross-ref:** `kernel/boot/src/hwinv.rs`, `kernel/docs/DRIVER_MODEL.md`, `kernel/scripts/mint-edit-token-ledger.sh`, path2/qprism harnesses.
 
@@ -45,7 +45,7 @@ Per OP-JESSE ("the OLD super-slow amazing system is there still"), acer located 
 
 **The resource-regulator is already live lineage**, not a new idea: `packages/dashboard/src/super-os-viz/super-dashboard-server.mjs` carries the **"Watcher Perimeter" = CPU/GPU/task-manager/process observers feeding Asolaria** — `BOOTRESOURCE`/`BOOTREGULATE` re-encode that existing organ.
 
-**Honest gap (reinvent, not reuse):** the old system's "organs of judgment" (GNN scorer/oracle) were **stubs/hashes**; D48/D49 + the 60D runtime codec were flagged **absent**; `taskManager` was marked "missing"; live cross-host handshake UNVERIFIED. The judgment/GNN organs (`BOOTWATCH` verdicts beyond PASS/HOLD) are the real build, not a port.
+**Honest gap — CORRECTED 2026-07-07 (after reading the code word-for-word):** the **judgment brain is BUILT.** `servers/fischer-eval/src/lib.rs` is a complete no_std CPL (centipawn-loss) chess-engine evaluator — verdicts `Proceed/Hold/Block/Refute/Analyze`, refute-tier fail-closed floor, **no-self-auth** — **9/9 tests green this session.** It is the terminal adjudication brain (see `BOOTJUDGE` below, and `ASI-OS-ON-METAL-KERNEL-BUILD-DESIGN.md`). What is *actually* still stub is narrower: the **reverse-GNN *scorer*** (`kernel/core/src/gnn/mod.rs` = `Unimplemented`; `reverse_risk_q` is a scalar projection `1−avgReverseGain`, not a trained model) and **`crypto::verify`** (ed25519 sig_valid always-false → L1 cosign not wired). The forward+reverse **gate structure is real** (`spawn_gate` 720/280 strictest-wins, PURE/E=0); the reverse *scorer* + real ed25519 are the genuine build items.
 
 ## 2c. BEHCS lineage + the Host8 substrate — where this contract sits
 
@@ -104,6 +104,13 @@ BOOTFAIL|target=<part_pid>|kind=missing_driver|shape_sig=<sha256>|phase=pre_stor
 BOOTWATCH|target=<part_pid>|watcher=RECALL_SHAPE|verdict=CLASSIFY|seat_guess=acer|evidence=failure_shape|json=0
 ```
 > acer's `8086:282A` failing because VMD isn't decoded **is a signature**; liris fails differently. Ultra-fast recall classifies the seat from the emitted **failure shape** — PID/device-specific recognition. (`OPERATOR_OBSERVED_HISTORY`: the first two colonies recognized which machine was which from failure-shape signal differences before they ever joined. `UNVERIFIED`-live — fabric endpoints timed out.)
+
+**Judgment — the terminal adjudication (the Bobby Fischer kernel, ABOVE the watchers):**
+The four `BOOTWATCH` verdicts + the reverse-gain veto fold into ONE terminal verdict emitted by the CPL evaluator (`servers/fischer-eval`, MEASURED 9/9). The canonical chain (CANON, `MAP.md:21`) is: `HOOKWALL → GNN_FORWARD → OMNISHANNON/SHANNON → REVERSE_GNN → omniflywheel_promote(score≥0.72 ∧ reverse_risk≤0.28)` → Fischer.
+```
+BOOTJUDGE|target=<part_pid>|verdict=<PROCEED|HOLD|BLOCK|REFUTE|ANALYZE>|glyph=<FP|FH|FB|FR|FA>|cpl=<q>|king_safety=<q>|center_gain=<q>|best_alt=<pid>|self_auth=0|operator_witness_required=<0|1>|json=0
+```
+> `self_auth=0` is invariant — a seat cannot authorize its own promotion. Refute-tier (self_authorize / skip_cosign / disable_halt / delete_evidence / bypass_hookwall) = cpl 999 → halt + human-apex. JSON-in-payload = refuted. Promotion past HOLD requires the GAC quintuple ed25519 cosign (§ governance) — `auto_fire_allowed=0` / `process_launch=0` ALWAYS until operator T0.
 
 **Pixels — selector/check units, not payload:**
 ```
