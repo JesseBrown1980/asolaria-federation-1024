@@ -1,0 +1,11 @@
+HBI|id=LIRIS_KERNEL_DEVICE_PID_TIME_60D_RECONSIDERATION_20260708|hbp=LIRIS-KERNEL-DEVICE-PID-TIME-60D-RECONSIDERATION-20260708.hbp|kind=kernel_reconsideration_index|json=0
+INDEX|row=KERNELRECONSIDER|scope=device_specific,pid_specific,time_specific,60D_plus|perspectives=ACER,LIRIS,RELIC|json=0
+INDEX|row=ACER_PERSPECTIVE|commit=08c7439d4f732db4f93b5404e40345b88cdf1a29|receipt_sha=e74cd4f8b5827bfa98c5061bc0ddd8073b4d1a7f3a8dac26096ab1591091dcac|json=0
+INDEX|row=ACER_DEVICE_VOXEL|pid=1318fbd10422eef6|coord_sha_prefix=1318fbd10422eef6|coord_prefix=979.310.131.995.978.505|json=0
+INDEX|row=LIRIS_PERSPECTIVE|substrate=SOVLINUX_USB_2TB|scan_digest=cac3cf0a22327c6b323c11298d049d4ae7f45079d341a0579b03a1522329d5be|usb_writes=0|json=0
+INDEX|row=RELIC_PERSPECTIVE|verified_acer_receipt_sha=e74cd4f8b5827bfa98c5061bc0ddd8073b4d1a7f3a8dac26096ab1591091dcac|bytes=1191|json=0
+INDEX|row=KERNEL_DEVICE_RULE|must_separate=pid,coord_sha,bh_coord,hw_tuple_pid_full|json=0
+INDEX|row=KERNEL_BOOT_RULE|must_bind=device_pid,boot_time,boot_nonce,rtc_or_tsc_source,kernel_build_hash|json=0
+INDEX|row=KERNEL_TIME_RULE|wall_clock_monotonic_receipt_time_not_conflated=1|json=0
+INDEX|row=NEXT_KERNEL_WORK|count=3|operator_gates=GitHub_target_verified,kernel_tests,relic_attack_verify,no_usb_write|json=0
+INDEX|row=BOUNDARY|no_kernel_mutation=1|no_usb_mutation=1|no_daemon_restart=1|json=0

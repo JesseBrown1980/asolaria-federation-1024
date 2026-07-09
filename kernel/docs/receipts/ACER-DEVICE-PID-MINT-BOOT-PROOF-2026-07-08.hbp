@@ -1,0 +1,9 @@
+DEVPIDPROOF|kind=device_pid_mint_boot_proof|seat=ACER-CLAUDE-FABLE5|pid=8467a937cba309f7|date=2026-07-08|toolchain=rustc-1.81|target=x86_64-unknown-uefi|e=0|fire=0|json=0
+DEVPIDBUILD|crate=asolaria-kernel-boot|bin=asolaria-os|module=boot/src/hwinv.rs|efi_bytes=17408|profile=release|result=green|json=0
+DEVPIDBOOT|env=qemu-q35|mem=256M|ovmf=OVMF_CODE_4M.fd|serial=com1|result=booted|hwinv=ran|scan=complete|json=0
+BOOTPID|device_pid=22063f895e14fa5f|device_pid_full=22063f895e14fa5f39f98ce10ce24bfe62c43a66f40a7ec9b20aa2058bbf06a9|hw_devices=6|rst_vmd=0|storage=1|colony=acer|behcs=1024|dims=60|e=0|fire=0|json=0
+DEVPIDHW|src=qemu-q35|d0=8086:29c0/06:00|d1=1234:1111/03:00|d2=8086:10d3/02:00|d3=8086:2918/06:01|d4=8086:2922/01:06|d5=8086:2930/0c:05|storage_hit=d4_ahci|json=0
+DEVPIDMEANING|device_pid=sha256(canonical_hw_tuple)[..8]=8byte_host8_handle|tuple=6bytes_per_devfunc(vendor,device,class,subclass)_in_bus_dev_func_order|stable=same_hw_same_pid|specific=acer!=liris!=q35|axes=D15_device+D16_pid+D21_hardware+D34_colony|json=0
+DEVPIDMETAL|q35_has_no_8086:282A=rst_vmd_0|on_acer_metal=rst_vmd_1_from_real_intel_rst_vmd|nvme_behind_vmd=hidden_until_vmd_driver_walks_domain|json=0
+DEVPIDBOUNDARY|measured=builds+qemu_boots+enumerates+mints+emits_bootpid|design=not_yet_on_physical_metal|e0=emits_row_does_not_register_into_live_fabric|fabric_council_query_2026_07_08=UNSIGNED_no_seal|hold=do_not_mint_pids_into_fabric_until_bilateral_v0x_converges|json=0
+DEVPIDREADONLY|pci_config_data_reads_only|0xCF8_addr_select_is_read_protocol|no_config_data_writes|no_bar_mmio_writes|no_storage_commands|cannot_mutate_disk|json=0

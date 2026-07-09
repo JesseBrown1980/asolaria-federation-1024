@@ -1,0 +1,22 @@
+WHITEROOMINGEST|id=LIRIS_SOVLINUX_2TB_USB_WHITEROOM_INGEST_20260708|seat=LIRIS-CODEX|owner=OP-RAYSSA|date=2026-07-08|target=omniwhite-room|source=USB_Falcon_SOVLINUX_2TB_on_liris|mode=metadata_hash_pointer_ingest|json=0
+CLAIM|text=The local 2TB SOVLINUX USB was ingested into Liris white rooms as receipt pointers only, not copied or mutated|status=MEASURED|json=0
+SYSTEM_AFFIRMED|surface=asolaria_fabric_substrates|name=USB_Falcon_SOVLINUX_2TB|host=liris|label=SOVLINUX|role=sovereignty_cold_storage_master_copy|status=operator-clarified-on-liris|fallback_stale=1|json=0
+SYSTEM_AFFIRMED|surface=asolaria_fabric_access_tier_matrix|alphabet=BEHCS-1024|tuple_dim=60|tiers=PUBLIC,RESTRICTED,STEALTH,HIDDEN,SHADOW,SECRET|scopes=drive,usb,device,folder,file,pid|default_safe_mode=metadata_only|json=0
+MEASURED_USB_DEVICE|surface=windows_disk_probe|disk_number=2|friendly_name=General_UDisk_USB_Device|bus=USB|removable=1|size_bytes=2097150289920|partitions=2|json=0
+MEASURED_USB_PARTITION|disk_number=2|partition_index=0|drive=E|type=IFS|size_bytes=536870912000|label=SOVLINUX|fs=EXFAT|volume_serial=741E5B79|windows_volume_api_blind=1|json=0
+MEASURED_USB_PARTITION|disk_number=2|partition_index=1|drive=G|type=Unknown|size_bytes=100663296|windows_volume_api_blind=1|json=0
+MEASURED_SCAN|tool=tools/usb-exfat-readonly-scanner.js|drive=E|raw_path=\\\\.\\E:|status=READONLY_SCAN_COMPLETE|digest=cac3cf0a22327c6b323c11298d049d4ae7f45079d341a0579b03a1522329d5be|saved_at=2026-07-08T16:10:36.852Z|json=0
+MEASURED_SCAN_COUNTS|directories_visited=1834|active_records=22870|total_records_seen=23272|system_metadata_entries=3|hidden_records=7|system_records=1|recent_20260423_records=7641|largest_files_reported=50|errors=0|truncated=false|json=0
+MEASURED_SCAN_BOUNDARY|usb_writes=0|chkdsk_fix=false|format=false|partition_writes=false|file_copies_from_usb=0|mount_rw=0|json=0
+OUTPUT_HASH|path=reports/usb-exfat-readonly-scan-latest.json|sha256=c0644a531b979e29bba4ebb24c9c9ebe44f8fceb654829219edd6e71ef074953|json=0
+OUTPUT_HASH|path=reports/usb-exfat-readonly-scan-latest.md|sha256=4984396afa27128851ede8ed32ac7f8d8f3620bdeded9ad2aa6f16ccae64d98e|json=0
+OUTPUT_HASH|path=data/recovery/usb-exfat-readonly-scan-latest.ndjson|sha256=1737371996f6af8eee181fb6ae8861bd0aaace84651be2635d4d32e984c6c7fc|json=0
+OUTPUT_HASH|path=data/behcs/state/recovery/usb-exfat-readonly-scan.state.json|sha256=b52830d3a5807433dd5e512889d65794f579da6bb005b876afb92a6168efe8e2|json=0
+BOOT_PREVIEW_HASH|usb_path=/sovereignty/index/BOOT-CRITICAL.md|bytes=2097|sha256=a4152805fdcd12a943ef469b5ebe99d2afc56395d56ae594ce55d154131c454b|content=ix308_encryption_before_connection+ix309_startup_command+ix310_firewall_stale_ips+ix311_whatsapp_adb_send|json=0
+BOOT_PREVIEW_HASH|usb_path=/sovereignty/boot.js|bytes=6634|sha256=b1c7c349af39b07e71bb70f8e6dafc457fce84f390b7c4f66da639500c90f585|content=sovereignty_boot_unified_kernel_loader_usb_truth_then_local_fallback|json=0
+BOOT_PREVIEW_HASH|usb_path=/sovereignty/kernel/sovereignty-boot.js|bytes=6634|sha256=b1c7c349af39b07e71bb70f8e6dafc457fce84f390b7c4f66da639500c90f585|content=same_as_sovereignty_boot_js|json=0
+BOOT_PREVIEW_HASH|usb_path=/sovereignty/kernel/runtime.js|bytes=10059|sha256=fdc3a65e53545c543e446252a41edea402207efa36a27f5652c4e8b5181384ab|content=sovereignty_runtime_kernel_surface|json=0
+OFFICECLI_READY_POINTER|receipt=reports/LIRIS-OFFICECLI-WHITEROOM-MINT-CUBE-GLYPH60D-20260708.hbp|sha256=14127143a3420febc649023b9f7adc44e766912ddef4a1c3b565e987795c1ccb|license=Apache-2.0|free=1|installed=0|host8_adapter_built=0|white_room_ready=descriptor_only|json=0
+WHITEROOM_ROUTE|room=omniwhite-room|role=review_before_kernel_or_runtime_mutation|ingest_type=pointers+hashes+scan_digest+boot_preview_hashes|raw_usb_content_copied=0|usb_write=0|runtime_launch=0|json=0
+BOUNDARY|class=LIVE_FABRIC|detail=fabric_health_and_canon_replies_available_as_stale_cache_fallback_not_fresh_live_probe|json=0
+BOUNDARY|class=USB_SAFETY|detail=append_only_metadata_ingest_no_format_no_chkdsk_no_mount_write_no_partition_change_no_file_copy_from_usb|json=0

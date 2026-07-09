@@ -1,8 +1,11 @@
 #![no_std]
 #![no_main]
 
+mod bootproj;
+mod driver_rst_vmd;
 mod hwinv;
 mod init;
+mod rtc;
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::panic::PanicInfo;
@@ -275,7 +278,7 @@ unsafe fn serial_print(msg: &[u8]) {
 
 /// UEFI application entry point. The `x86_64-unknown-uefi` target links against the `efi_main`
 /// symbol (`/entry:efi_main /subsystem:efi_application`); firmware calls it with the image handle
-/// + system table. We print the boot banner via ConOut, bring up the heap, and hand off to the
+/// and system table. We print the boot banner via ConOut, bring up the heap, and hand off to the
 /// kernel init (envelope-REPL), which diverges.
 ///
 /// HONEST next step (`frame_alloc` v0.2): the heap is a fixed 16 KiB static `BumpAllocator`. A
@@ -295,7 +298,13 @@ pub extern "efiapi" fn efi_main(
         // Pre-driver metal-readiness: dump the PCI hardware inventory over serial
         // (read-only 0xCF8/0xCFC enumeration). On acer this reveals the Intel RST/VMD
         // storage controller 8086:282A; under QEMU it lists the emulated q35 devices.
-        hwinv::pci_scan();
+        let hw = hwinv::pci_scan();
+        // Time for our OS: read the real metal clock (CMOS RTC + TSC) -> BOOTTIME.
+        let bt = rtc::read_boot_time();
+        // BootProjection = device + time: mint a per-boot boot_pid -> BOOTPROJ.
+        let boot_pid = bootproj::emit(&hw.device_digest, &bt);
+        // Device-gated + time-stamped storage-driver scaffold (engages only on 8086:282A).
+        driver_rst_vmd::probe(&hw, &boot_pid, &bt);
         // Graphics console (real monitor / GOP) — same banner.
         uefi_print(
             system_table,
