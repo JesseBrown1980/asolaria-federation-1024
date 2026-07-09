@@ -1,0 +1,6 @@
+HBI|id=ACER_OP_JESSE_QUINTUPLE_AUTH_CONTINUATION_20260709|hbp=ACER-OP-JESSE-QUINTUPLE-AUTH-CONTINUATION-20260709.hbp|kind=authorization_continuation_index|json=0
+INDEX|row=OPERATOR_AUTHORIZATION|class=OPERATOR_SUPPLIED_PLUS_GITHUB_RECORDED|operator=OP-JESSE|gates=LIRIS_ACER_RELIC|json=0
+INDEX|row=GITHUB_PR42|head=8d9f23bdefe015fec9ad58ee455009827ebad0f4|checks=5_success|reviews=0|merge_state=blocked_by_review_policy|json=0
+INDEX|row=ASOLARIA_OS|main=393e10a47726abcd6be4be92373df88aedb1ddac|kernel_gate=success|asobtid=ACER_Fable5_device_time_60D_boot_identity|json=0
+INDEX|row=ROUTE_STATE|fabric=fault_or_timeout|web=fault|classification=UNVERIFIED_ROUTE_FAULT|json=0
+INDEX|row=BOUNDARY|usb_write=0|bootloader_mutation=0|daemon_restart=0|provider_call=0|live_boot=0|json=0
