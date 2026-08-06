@@ -11,7 +11,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.81"
 license = "MIT OR Apache-2.0"
 authors = ["Asolaria Federation"]
 repository = "https://github.com/<TBD per Phase-1 step 3>/asolaria-federation-1024"
