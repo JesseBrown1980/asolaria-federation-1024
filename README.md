@@ -1,5 +1,17 @@
 # Asolaria Federation · BEHCS-1024 OS
 
+## Toolchain rule (operator, global — no exceptions)
+
+**Rust 1.81 with clippy. Integer arithmetic and ternary (trits) only — never float.**
+
+Pinned in `rust-toolchain.toml` (`channel = "1.81.0"`, `components = ["clippy", "rustfmt"]`),
+declared as `rust-version = "1.81"` in every `Cargo.toml`, and enforced in CI by
+`cargo clippy --all-targets -- -D warnings` plus a hard grep that fails the build on any
+`f32`/`f64` in `src/` or `tests/`.
+
+Any receipt in this repository naming a toolchain other than 1.81 records a run made outside
+the rule. It is retained as history, not as the toolchain of record.
+
 **Anchor PID:** `ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11`
 **Authorized:** 2026-05-11T16:40Z · quintuple-cosign window 2026-05-11 → 2026-05-25
 **Operator pair:** OP-JESSE-BROWN + OP-RAYSSA-CHIQUETO · **Witnesses:** Amy + Felipe + Dan
