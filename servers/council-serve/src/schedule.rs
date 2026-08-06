@@ -19,16 +19,18 @@
 #[derive(Debug, Clone)]
 pub struct Proposal {
     pub id: String,
-    pub score: f64,
-    pub genius: f64,
-    pub risk: f64,
+    /// All three are q in 0..=1000 (per-mille; integer only) — same unit as `gnn_score_q`.
+    pub score_q: u16,
+    pub genius_q: u16,
+    pub risk_q: u16,
 }
 
 /// One scheduled decision. `verify` = selected for the expensive verify pass; `fire` is ALWAYS false.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scheduled {
     pub id: String,
-    pub confidence: f64,
+    /// Expected-acceptance prior as q in 0..=1000 (per-mille; integer only).
+    pub confidence_q: u16,
     pub rank: usize,
     pub verify: bool,
     pub fire: bool,
@@ -36,8 +38,12 @@ pub struct Scheduled {
 
 /// Cheap expected-acceptance ("survival") prior, clamped to [0,1]. Cheap BY DESIGN — the whole point
 /// is to ration the EXPENSIVE verify with a cheap signal. score + genius lift acceptance, risk cuts it.
-pub fn expected_acceptance(p: &Proposal) -> f64 {
-    (0.5 * p.score + 0.5 * p.genius - p.risk).clamp(0.0, 1.0)
+pub fn expected_acceptance_q(p: &Proposal) -> u16 {
+    // (score + genius) / 2 - risk, clamped to 0..=1000. Integer only; the halving is a single
+    // integer divide of the summed pair, so no per-term rounding.
+    let lift = (p.score_q as u32 + p.genius_q as u32) / 2;
+    let v = lift.saturating_sub(p.risk_q as u32);
+    if v > 1000 { 1000 } else { v as u16 }
 }
 
 /// Rank proposals by expected acceptance (desc, stable tiebreak by id); select the top `verify_budget`
@@ -45,13 +51,13 @@ pub fn expected_acceptance(p: &Proposal) -> f64 {
 pub fn confidence_schedule(
     proposals: &[Proposal],
     verify_budget: usize,
-    accept_threshold: f64,
+    accept_threshold_q: u16,
 ) -> Vec<Scheduled> {
     let mut order: Vec<usize> = (0..proposals.len()).collect();
     order.sort_by(|&a, &b| {
-        expected_acceptance(&proposals[b])
-            .partial_cmp(&expected_acceptance(&proposals[a]))
-            .unwrap_or(std::cmp::Ordering::Equal)
+        // integer ordering — total, no partial_cmp/NaN case
+        expected_acceptance_q(&proposals[b])
+            .cmp(&expected_acceptance_q(&proposals[a]))
             .then_with(|| proposals[a].id.cmp(&proposals[b].id))
     });
     let mut verified = 0usize;
@@ -59,14 +65,14 @@ pub fn confidence_schedule(
         .iter()
         .enumerate()
         .map(|(rank, &i)| {
-            let confidence = expected_acceptance(&proposals[i]);
-            let verify = verified < verify_budget && confidence >= accept_threshold;
+            let confidence_q = expected_acceptance_q(&proposals[i]);
+            let verify = verified < verify_budget && confidence_q >= accept_threshold_q;
             if verify {
                 verified += 1;
             }
             Scheduled {
                 id: proposals[i].id.clone(),
-                confidence,
+                confidence_q,
                 rank,
                 verify,
                 fire: false,
@@ -79,7 +85,7 @@ pub fn confidence_schedule(
 mod tests {
     use super::*;
 
-    fn p(id: &str, score: f64, genius: f64, risk: f64) -> Proposal {
+    fn p(id: &str, score_q: u16, genius_q: u16, risk_q: u16) -> Proposal {
         Proposal {
             id: id.to_string(),
             score,
@@ -90,17 +96,17 @@ mod tests {
 
     #[test]
     fn expected_acceptance_is_clamped_and_risk_penalized() {
-        assert!((expected_acceptance(&p("a", 1.0, 1.0, 0.0)) - 1.0).abs() < 1e-9);
-        assert_eq!(expected_acceptance(&p("b", 0.0, 0.0, 1.0)), 0.0); // clamped, not negative
-        let lo = expected_acceptance(&p("c", 0.8, 0.8, 0.6));
-        let hi = expected_acceptance(&p("d", 0.8, 0.8, 0.0));
+        assert_eq!(expected_acceptance_q(&p("a", 1000, 1000, 0)), 1000);
+        assert_eq!(expected_acceptance_q(&p("b", 0, 0, 1000)), 0); // clamped, not negative
+        let lo = expected_acceptance_q(&p("c", 800, 800, 600));
+        let hi = expected_acceptance_q(&p("d", 800, 800, 0));
         assert!(hi > lo, "risk must lower expected acceptance");
     }
 
     #[test]
     fn ranks_high_survival_first() {
         let props = [p("low", 0.1, 0.1, 0.0), p("high", 0.9, 0.9, 0.0)];
-        let s = confidence_schedule(&props, 2, 0.0);
+        let s = confidence_schedule(&props, 2, 0);
         assert_eq!(s[0].id, "high");
         assert_eq!(s[0].rank, 0);
         assert_eq!(s[1].id, "low");
@@ -113,7 +119,7 @@ mod tests {
             p("b", 0.8, 0.8, 0.0),
             p("c", 0.7, 0.7, 0.0),
         ];
-        let s = confidence_schedule(&props, 2, 0.0);
+        let s = confidence_schedule(&props, 2, 0);
         assert_eq!(
             s.iter().filter(|x| x.verify).count(),
             2,
@@ -127,7 +133,7 @@ mod tests {
     fn threshold_prevents_wasted_verify_on_low_survival() {
         // budget is generous but everything is below threshold -> nothing verified (no waste)
         let props = [p("a", 0.2, 0.2, 0.0), p("b", 0.1, 0.1, 0.0)];
-        let s = confidence_schedule(&props, 10, 0.5);
+        let s = confidence_schedule(&props, 10, 500);
         assert_eq!(
             s.iter().filter(|x| x.verify).count(),
             0,
@@ -138,7 +144,7 @@ mod tests {
     #[test]
     fn schedule_never_fires() {
         let props = [p("a", 1.0, 1.0, 0.0), p("b", 0.9, 0.9, 0.0)];
-        let s = confidence_schedule(&props, 10, 0.0);
+        let s = confidence_schedule(&props, 10, 0);
         assert!(
             s.iter().all(|x| !x.fire),
             "scheduling must never fire (engine stays gated)"
@@ -154,7 +160,7 @@ mod tests {
     #[test]
     fn dspark_property_high_score_low_risk_beats_low_score_high_risk() {
         let props = [p("weak", 0.3, 0.3, 0.4), p("strong", 0.85, 0.85, 0.05)];
-        let s = confidence_schedule(&props, 1, 0.5);
+        let s = confidence_schedule(&props, 1, 500);
         let strong = s.iter().find(|x| x.id == "strong").unwrap();
         let weak = s.iter().find(|x| x.id == "weak").unwrap();
         assert!(
