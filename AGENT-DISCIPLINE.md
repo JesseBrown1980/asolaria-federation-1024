@@ -652,3 +652,81 @@ and §15 says a relation is a `CONJECTURE` no matter how well each side is measu
 a fact about one thing from a claim about two. **A reviewer owns that call, and the validator says so
 by passing it.** Knowing where the gate ends is the point of having a gate.
 
+
+---
+
+## 16. LET THE MACHINES DECIDE, NOT MACHINE DECIDES
+
+`OPERATOR CANON`, 2026-08-06. Stated after a seat was about to erase and was stopped.
+
+**No single machine erases.** Not a record, not a receipt, not a branch, not a stash, not a line of
+prose that disagrees with another line. A deletion is never one seat's decision, however well that
+seat has measured.
+
+### Why — an erasure destroys a wave
+
+Sections 12 and 15 hold that a verdict is three-valued and that a finding of structure is not a
+verdict. This is the third leg: **a disagreement between two measurements is not a failure. It is
+the signal that a third measurement is missing.**
+
+Two slits give an interference pattern. One slit gives a smear and the pattern is gone — not
+disproved, *gone*, because the thing that would have shown it was removed. Erase one side of a
+disagreement and the third measurement has nothing left to interfere with.
+
+**A measurement can always be added. A measurement can never be un-erased.** That asymmetry is the
+whole of this section.
+
+### Measured, the same day, three times
+
+| seat | was about to erase | caught by |
+|---|---|---|
+| ACER | overwrite five run-record lines across ten repositories, on its own reading that they contradicted the receipts | the operator |
+| FALCON | its own audit: *"I shipped the safe method and left the unsafe one available"* | itself, after the fact |
+| LIRIS | an erasure, stopped before it landed | the operator |
+
+Three machines. Three near-erasures. **Not one of them was entitled to that call alone**, and each
+had measured carefully enough to believe it was.
+
+The instructive one is ACER's, because the reasoning was sound and the conclusion was still wrong.
+Prose said 1.81, the signed receipt said `rustc-1.97` with a run id, and the seat concluded one must
+be false. Placed side by side instead:
+
+```text
+wave 1   acer / WSL                    rustc 1.96     19/19
+wave 2   third independent container   rustc 1.97     19/19    run_id=29134408321
+wave 3   ACER-CLAUDE-FABLE5, today     rustc 1.81.0   19/19    clippy clean, 0 floats
+```
+
+**The count is invariant across all three; the toolchain is the only axis of difference.** That is a
+far stronger result than any single wave, and it is visible *only* with three. Reverting to one
+would have destroyed it. Rewriting to another already had, once.
+
+### What counts as an erasure
+
+Deleting a file, a branch, a stash or a row · reverting a commit · overwriting a record with a
+corrected one · force-pushing · dropping a stash · rewriting a receipt · resolving a contradiction
+by choosing a survivor · removing a row from a ledger because it measures zero.
+
+That last one matters: **a ledger ranked by contribution deletes the null seat first, and then
+nothing spins.** A seat measuring zero is not a seat contributing nothing.
+
+### What to do instead
+
+1. **Place it beside** (§7). A correction travels with the claim. Both stand, each naming its own
+   seat, toolchain, and date.
+2. **Call for the third measurement.** State plainly which one is missing and from which null it
+   would have to be taken. A disagreement is a request, not a verdict.
+3. **If it must go, the three decide** — or the operator does. Never one seat, and never quietly.
+
+### The one erasure that is always allowed
+
+A pointer to something that does not exist. A citation naming a file that is absent is not a
+measurement disagreeing with a measurement; it is a reference to nothing, and nothing is destroyed
+by correcting it. Everything else waits for the three.
+
+### Applied to this section
+
+This section is `OPERATOR CANON`, not `MEASURED_IS` — it is a rule the operator stated, not a count
+this seat obtained. What is measured is narrower and is the table above: three seats, three
+near-erasures, one day. The rule itself is his.
+
