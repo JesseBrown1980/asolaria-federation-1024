@@ -81,6 +81,40 @@ Identity, addressing, hashing, consensus — integers and trits only.
 
 ---
 
+### §2 addendum — two more places float breaks, measured 2026-08-06
+
+§2's finding stands: float round-trips all 1,000,080 addresses and "float is lossy" was a wrong
+guess. Identity is where it fails. Two further failures were measured in the corpus itself,
+in live code, not in a test rig:
+
+**(a) The same expression rounds differently on different machines.**
+`asolaria-federation-1024/servers/host8-serve/src/replay_prep.rs` carried this comment beside its
+own test:
+
+> *"weighted avgReverseGain = 0.7475 -> q 748; reverse_risk = 1 - 0.7475 = 0.2524999.. in f64
+> -> round -> 252 on Acer/MSVC. 748+252=1000."*
+
+A result that had to **name the machine and the compiler** to explain its own arithmetic. In
+integers the complement is exact — `1000 - 748 = 252` on every platform, by construction. The
+platform-dependence was not a rounding detail; it was the receipt depending on the host.
+
+**(b) Float silently corrupts integers above 2⁵³.**
+`asolaria-federation-1024/servers/council-serve/src/routes.rs` parsed non-negative integers by
+routing them through `f64`, while **the same file already contained an exact digit-run parser** and
+documented the hazard at another line: *"FNV handles exceed 2⁵³; float-routed parsing would corrupt
+them — json_u64 must be exact."* One path had simply never been moved. Any `ahead_by`/`behind_by`
+above 9,007,199,254,740,992 was being quietly rounded.
+
+**And a third, for completeness:** `intelligent-terminal`'s shimmer used float `cos()`, which is
+not guaranteed bit-identical between targets. Replaced by a 37-entry integer table: **0 per-mille
+deviation** from the original curve, **≤1 RGB level** difference, and now identical on every
+platform.
+
+So the sharper form of §2: **float fails identity, and it also fails reproducibility across hosts
+and range above 2⁵³.** All three are identity failures in disguise — the same value must be the
+same value, everywhere, or hashing and consensus come apart.
+
+
 ## 3. COUNT IS NOT RANGE
 
 ```
@@ -354,44 +388,7 @@ this file already carried a §12 (A VERDICT IS THREE-VALUED), so these are 13,
 14 and 15. Applying them as 12 and 13 would have put two different sections at
 §12 in eighteen repositories.
 
-## APPEND to §2 (after the existing FLOAT text, as an addendum)
-
-### §2 addendum — two more places float breaks, measured 2026-08-06
-
-§2's finding stands: float round-trips all 1,000,080 addresses and "float is lossy" was a wrong
-guess. Identity is where it fails. Two further failures were measured in the corpus itself,
-in live code, not in a test rig:
-
-**(a) The same expression rounds differently on different machines.**
-`asolaria-federation-1024/servers/host8-serve/src/replay_prep.rs` carried this comment beside its
-own test:
-
-> *"weighted avgReverseGain = 0.7475 -> q 748; reverse_risk = 1 - 0.7475 = 0.2524999.. in f64
-> -> round -> 252 on Acer/MSVC. 748+252=1000."*
-
-A result that had to **name the machine and the compiler** to explain its own arithmetic. In
-integers the complement is exact — `1000 - 748 = 252` on every platform, by construction. The
-platform-dependence was not a rounding detail; it was the receipt depending on the host.
-
-**(b) Float silently corrupts integers above 2⁵³.**
-`asolaria-federation-1024/servers/council-serve/src/routes.rs` parsed non-negative integers by
-routing them through `f64`, while **the same file already contained an exact digit-run parser** and
-documented the hazard at another line: *"FNV handles exceed 2⁵³; float-routed parsing would corrupt
-them — json_u64 must be exact."* One path had simply never been moved. Any `ahead_by`/`behind_by`
-above 9,007,199,254,740,992 was being quietly rounded.
-
-**And a third, for completeness:** `intelligent-terminal`'s shimmer used float `cos()`, which is
-not guaranteed bit-identical between targets. Replaced by a 37-entry integer table: **0 per-mille
-deviation** from the original curve, **≤1 RGB level** difference, and now identical on every
-platform.
-
-So the sharper form of §2: **float fails identity, and it also fails reproducibility across hosts
-and range above 2⁵³.** All three are identity failures in disguise — the same value must be the
-same value, everywhere, or hashing and consensus come apart.
-
----
-
-## NEW §13 — AN INFINITE RUN DOES NOT END. SAMPLE IT, THEN CLOSE IT.
+## 13. AN INFINITE RUN DOES NOT END. SAMPLE IT, THEN CLOSE IT.
 
 `MEASURED` 2026-08-06, cloud seat.
 
@@ -455,7 +452,7 @@ corpus sweep found one live instance discarding an entire unit-test suite.
 
 ---
 
-## NEW §14 — PIN THE TOOLCHAIN, AND SAY WHY
+## 14. PIN THE TOOLCHAIN, AND SAY WHY
 
 `MEASURED` 2026-08-05/06, all 182 repos swept.
 
@@ -729,4 +726,3 @@ by correcting it. Everything else waits for the three.
 This section is `OPERATOR CANON`, not `MEASURED_IS` — it is a rule the operator stated, not a count
 this seat obtained. What is measured is narrower and is the table above: three seats, three
 near-erasures, one day. The rule itself is his.
-
