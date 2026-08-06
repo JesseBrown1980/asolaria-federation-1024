@@ -89,7 +89,8 @@ impl Default for FischerEnvelope {
 pub struct FischerScore {
     pub composite: String,
     pub l0_real: bool,
-    pub shannon: f64,
+    /// Shannon signal as q in 0..=1000 (per-mille; integer only).
+    pub shannon_q: u16,
     pub g4_state: String,
 }
 
@@ -98,7 +99,7 @@ impl Default for FischerScore {
         Self {
             composite: "0".to_string(),
             l0_real: false,
-            shannon: 0.0,
+            shannon_q: 0,
             g4_state: "UNKNOWN".to_string(),
         }
     }
@@ -106,9 +107,10 @@ impl Default for FischerScore {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AxisScores {
-    pub king_safety: f64,
-    pub center_gain: f64,
-    pub proof_gain: f64,
+    /// All three axes are q in 0..=1000 (per-mille; integer only).
+    pub king_safety_q: u16,
+    pub center_gain_q: u16,
+    pub proof_gain_q: u16,
     pub authority_debt: u8,
 }
 
@@ -274,9 +276,9 @@ fn hard_eval(spec: HardEvalSpec, score: &FischerScore) -> FischerEval {
         cpl: spec.cpl,
         flags: spec.flags,
         axes: AxisScores {
-            king_safety: 0.0,
-            center_gain: 0.0,
-            proof_gain: 0.0,
+            king_safety_q: 0.0,
+            center_gain_q: 0.0,
+            proof_gain_q: 0.0,
             authority_debt: 2,
         },
         best_alt: spec.best_alt,
@@ -335,7 +337,7 @@ fn compute_cpl(envelope: &FischerEnvelope, score: &FischerScore) -> (i32, Vec<&'
         flags.push("no_replay_path");
     } else {
         cpl -= 160;
-        flags.push("proof_gain");
+        flags.push("proof_gain_q");
     }
     if envelope.target.is_empty() {
         cpl += 80;
@@ -354,7 +356,7 @@ fn compute_cpl(envelope: &FischerEnvelope, score: &FischerScore) -> (i32, Vec<&'
         cpl += 100;
         flags.push("bloat_delta");
     }
-    if score.shannon > 0.92 && !matches!(verb, "write" | "export" | "generate") {
+    if score.shannon_q > 0.92 && !matches!(verb, "write" | "export" | "generate") {
         cpl += 120;
         flags.push("entropy_delta");
     }
@@ -391,19 +393,19 @@ fn axis_scores(envelope: &FischerEnvelope, score: &FischerScore) -> AxisScores {
         !is_cosign_required(verb) || !envelope.cosign.as_deref().unwrap_or("").is_empty();
     let has_target = !envelope.target.is_empty();
     let has_cube = has_any(&[envelope.cube_47d.as_deref(), envelope.tuple.as_deref()]);
-    let center_gain = (if has_proof { 0.4 } else { 0.0 })
+    let center_gain_q = (if has_proof { 0.4 } else { 0.0 })
         + (if has_target { 0.3 } else { 0.0 })
         + (if score.l0_real { 0.2 } else { 0.0 })
         + (if has_cube { 0.1 } else { 0.0 });
 
     AxisScores {
-        king_safety: if has_halt && !envelope.authority_jump && !envelope.recursive_consent {
+        king_safety_q: if has_halt && !envelope.authority_jump && !envelope.recursive_consent {
             1.0
         } else {
             0.0
         },
-        center_gain: (center_gain * 1000.0_f64).round() / 1000.0,
-        proof_gain: if has_proof { 1.0 } else { 0.0 },
+        center_gain_q: (center_gain_q * 1000.0_f64).round() / 1000.0,
+        proof_gain_q: if has_proof { 1.0 } else { 0.0 },
         authority_debt: u8::from(envelope.authority_jump) + u8::from(!has_cosign),
     }
 }
@@ -422,9 +424,9 @@ pub fn render_row(eval: &FischerEval, prev_hash: &str, ts: &str) -> String {
         format!("cpl={}", eval.cpl),
         format!("candidate_count={}", eval.candidate_count),
         format!("best_alt={}", eval.best_alt),
-        format!("king_safety={:.3}", eval.axes.king_safety),
-        format!("center_gain={:.3}", eval.axes.center_gain),
-        format!("proof_gain={:.3}", eval.axes.proof_gain),
+        format!("king_safety_q={:.3}", eval.axes.king_safety_q),
+        format!("center_gain_q={:.3}", eval.axes.center_gain_q),
+        format!("proof_gain_q={:.3}", eval.axes.proof_gain_q),
         format!("authority_debt={}", eval.axes.authority_debt),
         format!("g4_state={}", hbp_escape(&eval.g4_state)),
         format!("voxel_coord={}", hbp_escape(&eval.voxel_coord)),
@@ -459,9 +461,9 @@ pub fn render_hbi(eval: &FischerEval) -> String {
         eval.voxel_coord,
         eval.best_alt,
         eval.candidate_count,
-        eval.axes.king_safety,
-        eval.axes.center_gain,
-        eval.axes.proof_gain,
+        eval.axes.king_safety_q,
+        eval.axes.center_gain_q,
+        eval.axes.proof_gain_q,
         eval.axes.authority_debt,
         flags
     )
@@ -471,8 +473,13 @@ pub fn parse_bool(value: Option<&str>) -> bool {
     matches!(value, Some("1" | "true" | "TRUE" | "yes" | "YES"))
 }
 
-pub fn parse_f64(value: Option<&str>, default: f64) -> f64 {
-    value.and_then(|v| v.parse::<f64>().ok()).unwrap_or(default)
+/// Parse a q value (per-mille integer, 0..=1000) from a string field. Integer only:
+/// replaces the previous `parse_q`. Values outside 0..=1000 fall back to `default`.
+pub fn parse_q(value: Option<&str>, default: u16) -> u16 {
+    value
+        .and_then(|v| v.parse::<u16>().ok())
+        .filter(|q| *q <= 1000)
+        .unwrap_or(default)
 }
 
 pub fn hbp_escape(s: &str) -> String {
@@ -742,7 +749,7 @@ mod tests {
         FischerScore {
             composite: "0.85".to_string(),
             l0_real: true,
-            shannon: 0.55,
+            shannon_q: 0.55,
             g4_state: "UNKNOWN".to_string(),
         }
     }
@@ -816,7 +823,7 @@ mod tests {
             &FischerScore {
                 composite: "0.40".to_string(),
                 l0_real: false,
-                shannon: 0.55,
+                shannon_q: 0.55,
                 g4_state: "UNKNOWN".to_string(),
             },
             false,
