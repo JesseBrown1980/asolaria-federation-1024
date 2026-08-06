@@ -85,7 +85,8 @@ pub enum RoutingDecision {
 #[derive(Debug, Clone)]
 pub struct RankedItem {
     pub item_id: String,
-    pub score: f32,
+    /// Rank score as q in 0..=1000 (per-mille; integer only).
+    pub score_q: u16,
 }
 
 /// Verdict-aggregator output from GNN.
@@ -112,7 +113,7 @@ pub fn top_n_deterministic_fallback(items: &[String], n: usize) -> Vec<RankedIte
         .enumerate()
         .map(|(i, id)| RankedItem {
             item_id: id.clone(),
-            score: 1.0 - (i as f32) * 0.001,
+            score_q: 1000u16.saturating_sub(i as u16),
         })
         .collect()
 }
@@ -209,18 +210,18 @@ impl GnnInference {
     /// This is not a hash repeat and not GPU inference: it measures byte transitions,
     /// printable density, entropy-ish spread, and edge alternation directly from the
     /// envelope bytes. It is stable, no_std, HBP-friendly, and available before GPU.
-    pub fn score_bytes(&self, bytes: &[u8]) -> Result<f32, GnnErr> {
+    pub fn score_bytes(&self, bytes: &[u8]) -> Result<u16, GnnErr> {
         Ok(score_bytes_pixels_first(bytes))
     }
 
     /// Routing oracle: predict best route for envelope using pixels-first byte score.
     pub fn predict_route(&self, envelope_bytes: &[u8]) -> Result<RoutingDecision, GnnErr> {
         let score = self.score_bytes(envelope_bytes)?;
-        if score >= 0.86 {
+        if score >= 860 {
             Ok(RoutingDecision::QuadBroadcast)
-        } else if score >= 0.72 {
+        } else if score >= 720 {
             Ok(RoutingDecision::TriadBroadcast)
-        } else if score >= 0.58 {
+        } else if score >= 580 {
             Ok(RoutingDecision::UnicastLiris)
         } else {
             Ok(RoutingDecision::Local)
@@ -233,15 +234,11 @@ impl GnnInference {
             .iter()
             .map(|id| RankedItem {
                 item_id: id.clone(),
-                score: self.score_bytes(id.as_bytes()).unwrap_or(0.0),
+                score_q: self.score_bytes(id.as_bytes()).unwrap_or(0),
             })
             .collect();
-        ranked.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(core::cmp::Ordering::Equal)
-                .then_with(|| a.item_id.cmp(&b.item_id))
-        });
+        // integer ordering — total, no partial_cmp/NaN case to handle
+        ranked.sort_by(|a, b| b.score_q.cmp(&a.score_q).then_with(|| a.item_id.cmp(&b.item_id)));
         ranked.truncate(n);
         Ok(ranked)
     }
@@ -255,14 +252,15 @@ impl GnnInference {
         if total_votes == 0 {
             return Ok(AggregatedVerdict::Hold);
         }
-        let pct = votes_in_favor as f32 / total_votes as f32;
-        if pct >= 0.80 {
+        // integer per-mille of the vote share; exact, no division rounding at the boundary
+        let pct_pm = votes_in_favor as u64 * 1000 / total_votes as u64;
+        if pct_pm >= 800 {
             Ok(AggregatedVerdict::ProceedStrong)
-        } else if pct >= 0.60 {
+        } else if pct_pm >= 600 {
             Ok(AggregatedVerdict::ProceedWeak)
-        } else if pct > 0.40 {
+        } else if pct_pm > 400 {
             Ok(AggregatedVerdict::Hold)
-        } else if pct >= 0.20 {
+        } else if pct_pm >= 200 {
             Ok(AggregatedVerdict::Investigate)
         } else {
             Ok(AggregatedVerdict::Block)
@@ -290,9 +288,9 @@ pub fn score_frame_q(frame: ObservedFrame) -> u32 {
 /// `GnnInference::score_bytes`. Measures printable density, byte transitions, low-bit
 /// alternation, nibble occupancy, and high-byte ratio directly from the bytes (not a hash
 /// repeat, not GPU). Empty input scores 0.
-pub fn score_bytes_pixels_first(bytes: &[u8]) -> f32 {
+pub fn score_bytes_pixels_first(bytes: &[u8]) -> u16 {
     if bytes.is_empty() {
-        return 0.0;
+        return 0;
     }
     let mut printable = 0u32;
     let mut controls = 0u32;
@@ -320,21 +318,34 @@ pub fn score_bytes_pixels_first(bytes: &[u8]) -> f32 {
             prev = b;
         }
     }
-    let n = bytes.len() as f32;
-    let printable_ratio = printable as f32 / n;
-    let control_penalty = controls as f32 / n;
-    let high_ratio = high as f32 / n;
-    let transition_ratio = transitions as f32 / n.max(1.0);
-    let alternation_ratio = alternations as f32 / n.max(1.0);
-    let occupied = bins.iter().filter(|&&v| v > 0).count() as f32 / 16.0;
-    let score = 0.28 * printable_ratio
-        + 0.22 * transition_ratio
-        + 0.18 * alternation_ratio
-        + 0.18 * occupied
-        + 0.10 * high_ratio
-        + 0.04
-        - 0.35 * control_penalty;
-    score.clamp(0.0, 1.0)
+    // Integer only (operator rule: no float). Every ratio is PER-MILLE (0..=1000) and the
+    // weights are per-mille too, so the weighted sum is scaled by 1_000_000 and divided once
+    // at the end. Result is q in 0..=1000 — the same unit the rest of this repo already uses
+    // (`gnn_score_q`, `forward_score_q`, `reverse_risk_q`).
+    let n = bytes.len() as u64;
+    let printable_pm = printable as u64 * 1000 / n;
+    let control_pm = controls as u64 * 1000 / n;
+    let high_pm = high as u64 * 1000 / n;
+    let transition_pm = transitions as u64 * 1000 / n;
+    let alternation_pm = alternations as u64 * 1000 / n;
+    let occupied_pm = bins.iter().filter(|&&v| v > 0).count() as u64 * 1000 / 16;
+
+    // weights x1000: 0.28 -> 280, 0.22 -> 220, 0.18 -> 180, 0.10 -> 100, 0.04 -> 40, 0.35 -> 350
+    let positive = 280 * printable_pm
+        + 220 * transition_pm
+        + 180 * alternation_pm
+        + 180 * occupied_pm
+        + 100 * high_pm
+        + 40 * 1000;
+    let negative = 350 * control_pm;
+    let scaled = positive.saturating_sub(negative);
+    // divide the single accumulated 1e6 scale back to per-mille, round-half-up
+    let q = (scaled + 500) / 1000;
+    if q > 1000 {
+        1000
+    } else {
+        q as u16
+    }
 }
 
 // ===== STEP 3 — white-room Scorer + Omniflywheel verdict-aggregator =====
@@ -347,22 +358,22 @@ pub fn score_bytes_pixels_first(bytes: &[u8]) -> f32 {
 // classification only; no store, no I/O, no dispatch.
 
 /// White-room genius threshold — KEEP at/above, COMPACT below (asolaria-whiteroom-engine canon).
-pub const WHITEROOM_GENIUS_THRESHOLD: f32 = 0.72;
+pub const WHITEROOM_GENIUS_THRESHOLD_Q: u16 = 720;
 
 /// Omniflywheel maximum reverse-gain risk permitted for promotion.
-pub const OMNIFLYWHEEL_MAX_REVERSE_RISK: f32 = 0.28;
+pub const OMNIFLYWHEEL_MAX_REVERSE_RISK_Q: u16 = 280;
 
 /// Pluggable white-room scorer. Implementors map a mark's bytes to a score in [0, 1]. PURE:
 /// a scorer has no store and performs no I/O (the white-room STORE is a separate concern).
 pub trait Scorer {
-    /// Score a mark's bytes in [0, 1].
-    fn score(&self, mark: &[u8]) -> f32;
+    /// Score a mark's bytes as q in 0..=1000 (per-mille; integer only).
+    fn score_q(&self, mark: &[u8]) -> u16;
 }
 
 /// Pixels-first byte/edge scorer — the live hot-path scorer (no GPU, no hash repeat).
 pub struct PixelsFirstScorer;
 impl Scorer for PixelsFirstScorer {
-    fn score(&self, mark: &[u8]) -> f32 {
+    fn score_q(&self, mark: &[u8]) -> u16 {
         score_bytes_pixels_first(mark)
     }
 }
@@ -372,12 +383,13 @@ impl Scorer for PixelsFirstScorer {
 /// when the pixels-first/learned scorer is unavailable.
 pub struct DeterministicScorer;
 impl Scorer for DeterministicScorer {
-    fn score(&self, mark: &[u8]) -> f32 {
+    fn score_q(&self, mark: &[u8]) -> u16 {
         if mark.is_empty() {
-            return 0.0;
+            return 0;
         }
         let sum: u32 = mark.iter().map(|&b| b as u32).sum();
-        (sum % 1000) as f32 / 1000.0
+        // (sum % 1000) was already per-mille before being divided by 1000.0 — keep it exact.
+        (sum % 1000) as u16
     }
 }
 
@@ -392,9 +404,9 @@ pub enum WhiteRoomVerdict {
 }
 
 /// Classify a mark via a scorer into a white-room verdict. Returns `(score, verdict)`.
-pub fn whiteroom_verdict<S: Scorer>(scorer: &S, mark: &[u8]) -> (f32, WhiteRoomVerdict) {
-    let s = scorer.score(mark);
-    let v = if s >= WHITEROOM_GENIUS_THRESHOLD {
+pub fn whiteroom_verdict<S: Scorer>(scorer: &S, mark: &[u8]) -> (u16, WhiteRoomVerdict) {
+    let s = scorer.score_q(mark);
+    let v = if s >= WHITEROOM_GENIUS_THRESHOLD_Q {
         WhiteRoomVerdict::FarmGenius
     } else {
         WhiteRoomVerdict::CompactMistake
@@ -406,8 +418,8 @@ pub fn whiteroom_verdict<S: Scorer>(scorer: &S, mark: &[u8]) -> (f32, WhiteRoomV
 /// score clears the genius threshold AND its reverse-gain risk is within bound. This is the
 /// reverse-gain check the loop applies after the forward prism fold — a high forward score is
 /// necessary but NOT sufficient; the reverse risk must also be low.
-pub fn omniflywheel_promote(score: f32, reverse_risk: f32) -> bool {
-    score >= WHITEROOM_GENIUS_THRESHOLD && reverse_risk <= OMNIFLYWHEEL_MAX_REVERSE_RISK
+pub fn omniflywheel_promote(score_q: u16, reverse_risk_q: u16) -> bool {
+    score_q >= WHITEROOM_GENIUS_THRESHOLD_Q && reverse_risk_q <= OMNIFLYWHEEL_MAX_REVERSE_RISK_Q
 }
 
 #[cfg(test)]
@@ -519,7 +531,7 @@ mod tests {
         ];
         let ranked = GnnInference::new().rank_top_n(&items, 3).unwrap();
         assert_eq!(ranked.len(), 3);
-        assert!(ranked[0].score > ranked[1].score);
+        assert!(ranked[0].score_q > ranked[1].score_q);
     }
 
     #[test]
@@ -534,9 +546,9 @@ mod tests {
 
     // --- STEP 3 white-room scorer + Omniflywheel aggregator ---
 
-    struct FixedScorer(f32);
+    struct FixedScorer(u16);
     impl Scorer for FixedScorer {
-        fn score(&self, _mark: &[u8]) -> f32 {
+        fn score_q(&self, _mark: &[u8]) -> u16 {
             self.0
         }
     }
@@ -544,40 +556,40 @@ mod tests {
     #[test]
     fn whiteroom_verdict_keeps_genius_compacts_mistake() {
         assert_eq!(
-            whiteroom_verdict(&FixedScorer(0.80), b"x").1,
+            whiteroom_verdict(&FixedScorer(800), b"x").1,
             WhiteRoomVerdict::FarmGenius
         );
         assert_eq!(
-            whiteroom_verdict(&FixedScorer(0.50), b"x").1,
+            whiteroom_verdict(&FixedScorer(500), b"x").1,
             WhiteRoomVerdict::CompactMistake
         );
         // exactly at the threshold counts as genius (>=).
         assert_eq!(
-            whiteroom_verdict(&FixedScorer(WHITEROOM_GENIUS_THRESHOLD), b"x").1,
+            whiteroom_verdict(&FixedScorer(WHITEROOM_GENIUS_THRESHOLD_Q), b"x").1,
             WhiteRoomVerdict::FarmGenius
         );
         // the score is passed through unchanged.
-        assert_eq!(whiteroom_verdict(&FixedScorer(0.80), b"x").0, 0.80);
+        assert_eq!(whiteroom_verdict(&FixedScorer(800), b"x").0, 800);
     }
 
     #[test]
     fn omniflywheel_promote_needs_high_score_and_low_reverse_risk() {
         assert!(
-            omniflywheel_promote(0.80, 0.10),
+            omniflywheel_promote(800, 100),
             "high score + low risk promotes"
         );
         assert!(
-            !omniflywheel_promote(0.80, 0.40),
+            !omniflywheel_promote(800, 400),
             "high reverse risk blocks promotion"
         );
         assert!(
-            !omniflywheel_promote(0.60, 0.10),
+            !omniflywheel_promote(600, 100),
             "low score blocks promotion"
         );
         // exactly at both bounds promotes (>= score, <= risk).
         assert!(omniflywheel_promote(
-            WHITEROOM_GENIUS_THRESHOLD,
-            OMNIFLYWHEEL_MAX_REVERSE_RISK
+            WHITEROOM_GENIUS_THRESHOLD_Q,
+            OMNIFLYWHEEL_MAX_REVERSE_RISK_Q
         ));
     }
 
@@ -586,16 +598,16 @@ mod tests {
         let s = PixelsFirstScorer;
         let g = GnnInference::new();
         let mark = b"HBPv1|row=edge|payload=abcd1234|json=0";
-        assert_eq!(s.score(mark), g.score_bytes(mark).unwrap());
-        assert_eq!(s.score(b""), 0.0);
+        assert_eq!(s.score_q(mark), g.score_bytes(mark).unwrap());
+        assert_eq!(s.score_q(b""), 0);
     }
 
     #[test]
     fn deterministic_scorer_is_stable_and_bounded() {
         let s = DeterministicScorer;
-        let a = s.score(b"hello world");
-        assert_eq!(a, s.score(b"hello world"), "deterministic");
+        let a = s.score_q(b"hello world");
+        assert_eq!(a, s.score_q(b"hello world"), "deterministic");
         assert!((0.0..=1.0).contains(&a), "bounded to [0,1]");
-        assert_eq!(s.score(b""), 0.0);
+        assert_eq!(s.score_q(b""), 0);
     }
 }
