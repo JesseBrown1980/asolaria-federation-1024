@@ -155,8 +155,10 @@ pub fn validate(env: &FedenvView<'_>) -> Result<(), RejectReason> {
         return Err(RejectReason::Malformed);
     }
     // 6. ttl_seconds: finite, (0, 86400].
-    match env.ttl_seconds.parse::<f64>() {
-        Ok(t) if t.is_finite() && t > 0.0 && t <= 86400.0 => {}
+    // whole seconds, integer only (operator rule: no float).
+    // NOTE: fractional TTLs such as "1.5" are now rejected as Malformed.
+    match env.ttl_seconds.parse::<u32>() {
+        Ok(t) if (1..=86_400).contains(&t) => {}
         _ => return Err(RejectReason::Malformed),
     }
     // 7/8. row_hash + antecedents: 16 lowercase hex.
