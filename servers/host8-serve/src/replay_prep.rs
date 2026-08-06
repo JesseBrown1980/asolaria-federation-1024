@@ -47,8 +47,9 @@ struct RegistryReplayStats {
     packets_loaded: u128,
     genius_hits: u128,
     mistake_hits: u128,
-    weighted_score: f64,
-    weighted_reverse_gain: f64,
+    /// Packet-weighted averages as q (per-mille, 0..=1000); integer only.
+    weighted_score_q: u32,
+    weighted_reverse_gain_q: u32,
     first_chunk_hash: String,
     last_chunk_hash: String,
     promote_chunks: u128,
@@ -114,20 +115,52 @@ fn json_u128_field(text: &str, key: &str) -> Option<u128> {
     json_number_slice(text, key)?.parse::<u128>().ok()
 }
 
-fn json_f64_field(text: &str, key: &str) -> Option<f64> {
-    json_number_slice(text, key)?.parse::<f64>().ok()
-}
-
-fn q_from_unit(v: f64) -> u32 {
-    if !v.is_finite() {
-        return 0;
+/// Parse a JSON number in [0, 1] into q (per-mille, 0..=1000) WITHOUT float: the digit run is
+/// read directly, three fractional digits are kept and the fourth rounds half-up. This replaces
+/// `json_f64_field` + `q_from_unit`, and with it the platform-dependent rounding that the
+/// registry test had to document (0.2524999.. rounding differently under MSVC).
+fn json_unit_q_field(text: &str, key: &str) -> Option<u32> {
+    let tok = json_number_slice(text, key)?.trim();
+    if tok.is_empty() || tok.contains('e') || tok.contains('E') {
+        return None;
     }
-    let clamped = v.clamp(0.0, 1.0);
-    (clamped * 1000.0).round() as u32
+    let neg = tok.starts_with('-');
+    let body = tok.trim_start_matches(['-', '+']);
+    let (int_part, frac_part) = match body.split_once('.') {
+        Some((i, f)) => (i, f),
+        None => (body, ""),
+    };
+    if !int_part.chars().all(|c| c.is_ascii_digit()) && !int_part.is_empty() {
+        return None;
+    }
+    if !frac_part.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    if neg {
+        return Some(0);
+    }
+    let int_val: u32 = if int_part.is_empty() { 0 } else { int_part.parse().ok()? };
+    if int_val >= 1 {
+        return Some(1000);
+    }
+    let mut milli: u32 = 0;
+    for (i, c) in frac_part.chars().take(4).enumerate() {
+        let d = c.to_digit(10)?;
+        if i < 3 {
+            milli = milli * 10 + d;
+        } else if d >= 5 {
+            milli += 1;
+        }
+    }
+    for _ in frac_part.chars().count()..3 {
+        milli *= 10;
+    }
+    Some(milli.min(1000))
 }
 
-pub(crate) fn reverse_risk_q_from_reverse_gain(avg_reverse_gain: f64) -> u32 {
-    q_from_unit(1.0 - avg_reverse_gain)
+/// reverse_risk = 1 - reverse_gain, in q. Exact integer complement: 1000 - q.
+pub(crate) fn reverse_risk_q_from_reverse_gain_q(avg_reverse_gain_q: u32) -> u32 {
+    1000u32.saturating_sub(avg_reverse_gain_q.min(1000))
 }
 
 fn registry_path_from_query(query: &str) -> Option<String> {
@@ -170,9 +203,10 @@ fn load_100b_registry_stats(registry_dir: &str, chunk_limit: Option<u128>) -> Re
         }
     };
 
-    let mut score_weight = 0.0f64;
-    let mut rg_weight = 0.0f64;
-    let mut weight_total = 0.0f64;
+    // packet-weighted accumulators in q*packets; u128 so no overflow and no rounding
+    let mut score_weight: u128 = 0;
+    let mut rg_weight: u128 = 0;
+    let mut weight_total: u128 = 0;
     let limit = chunk_limit.unwrap_or(u128::MAX);
     for line in BufReader::new(file).lines() {
         if stats.chunks_seen >= limit {
@@ -191,8 +225,8 @@ fn load_100b_registry_stats(registry_dir: &str, chunk_limit: Option<u128>) -> Re
         }
         stats.chunks_seen += 1;
         let packets = json_u128_field(line, "packets").unwrap_or(0);
-        let avg_score = json_f64_field(line, "avgScore");
-        let avg_reverse_gain = json_f64_field(line, "avgReverseGain");
+        let avg_score = json_unit_q_field(line, "avgScore");
+        let avg_reverse_gain = json_unit_q_field(line, "avgReverseGain");
         if packets == 0 || avg_score.is_none() || avg_reverse_gain.is_none() {
             stats.chunks_malformed += 1;
             continue;
@@ -216,21 +250,22 @@ fn load_100b_registry_stats(registry_dir: &str, chunk_limit: Option<u128>) -> Re
         stats.packets_loaded += packets;
         stats.genius_hits += genius;
         stats.mistake_hits += mistake;
-        let weight = packets as f64;
-        score_weight += avg_score * weight;
-        rg_weight += avg_reverse_gain * weight;
+        let weight = packets;
+        score_weight += avg_score as u128 * weight;
+        rg_weight += avg_reverse_gain as u128 * weight;
         weight_total += weight;
-        let score_q = q_from_unit(avg_score);
-        let risk_q = reverse_risk_q_from_reverse_gain(avg_reverse_gain);
+        let score_q = avg_score;
+        let risk_q = reverse_risk_q_from_reverse_gain_q(avg_reverse_gain);
         if score_q >= 720 && risk_q <= 280 {
             stats.promote_chunks += 1;
         } else {
             stats.hold_chunks += 1;
         }
     }
-    if weight_total > 0.0 {
-        stats.weighted_score = score_weight / weight_total;
-        stats.weighted_reverse_gain = rg_weight / weight_total;
+    if weight_total > 0 {
+        // one integer divide with round-half-up, applied once at the end
+        stats.weighted_score_q = ((score_weight * 2 + weight_total) / (weight_total * 2)) as u32;
+        stats.weighted_reverse_gain_q = ((rg_weight * 2 + weight_total) / (weight_total * 2)) as u32;
     }
     stats.loaded = stats.chunks_loaded > 0;
     stats
@@ -313,9 +348,9 @@ pub(crate) fn render_replay_prep(
 
     if let Some(registry_dir) = registry_path_from_query(query) {
         let stats = load_100b_registry_stats(&registry_dir, chunk_limit);
-        let score_q = q_from_unit(stats.weighted_score);
-        let reverse_gain_q = q_from_unit(stats.weighted_reverse_gain);
-        let reverse_risk_q = reverse_risk_q_from_reverse_gain(stats.weighted_reverse_gain);
+        let score_q = stats.weighted_score_q;
+        let reverse_gain_q = stats.weighted_reverse_gain_q;
+        let reverse_risk_q = reverse_risk_q_from_reverse_gain_q(stats.weighted_reverse_gain_q);
         let checkpoint_complete =
             stats.checkpoint_target > 0 && stats.checkpoint_processed >= stats.checkpoint_target;
         let packet_complete =
@@ -447,8 +482,9 @@ mod tests {
         assert!(out.contains("genius_hits=171"));
         assert!(out.contains("mistake_hits=29"));
         assert!(out.contains("avg_score_q=855"));
-        // weighted avgReverseGain = 0.7475 -> q 748; reverse_risk = 1 - 0.7475 =
-        // 0.2524999.. in f64 -> round -> 252 on Acer/MSVC. 748+252=1000.
+        // weighted avgReverseGain = 0.7475 -> q 748 (integer round-half-up); reverse_risk is
+        // the exact complement 1000 - 748 = 252 on every platform. The old float path produced
+        // 0.2524999.. and depended on the host's rounding — that hazard is gone.
         assert!(out.contains("avg_reverse_gain_q=748"));
         assert!(out.contains("reverse_risk_q=252"));
         assert!(out.contains("promote_chunks=2"));
@@ -477,8 +513,8 @@ mod tests {
 
     #[test]
     fn reverse_gain_to_reverse_risk_mapping_matches_omniflywheel_gate() {
-        assert_eq!(reverse_risk_q_from_reverse_gain(0.775), 225);
-        assert_eq!(reverse_risk_q_from_reverse_gain(0.720), 280);
-        assert_eq!(reverse_risk_q_from_reverse_gain(0.719), 281);
+        assert_eq!(reverse_risk_q_from_reverse_gain_q(0.775), 225);
+        assert_eq!(reverse_risk_q_from_reverse_gain_q(0.720), 280);
+        assert_eq!(reverse_risk_q_from_reverse_gain_q(0.719), 281);
     }
 }
