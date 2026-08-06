@@ -59,7 +59,8 @@ pub(crate) fn evaluate_launch_plan(input: LaunchPlanCognitionInput<'_>) -> Spawn
             input.forward_score_q, input.reverse_risk_q
         ),
         l0_real: input.forward_score_q > 0,
-        shannon: f64::from(input.forward_score_q.min(1000)) / 1000.0,
+        // q passes straight through — the float bridge is gone (integer only)
+        shannon_q: input.forward_score_q.min(1000) as u16,
         g4_state: "HOST8_LAUNCH_PLAN".to_string(),
     };
     let eval = evaluate(&envelope, &score, true);
