@@ -139,7 +139,7 @@ fn schedule_route() -> (u16, String) {
     render_schedule(
         &body,
         env_usize("ASOLARIA_VERIFY_BUDGET", 8),
-        env_f64("ASOLARIA_ACCEPT_THRESHOLD", 0.5),
+        env_q("ASOLARIA_ACCEPT_THRESHOLD", 0.5),
     )
 }
 
@@ -150,15 +150,17 @@ fn env_usize(key: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
-fn env_f64(key: &str, default: f64) -> f64 {
+/// Read a q value (per-mille integer, 0..=1000) from the environment. Integer only.
+fn env_q(key: &str, default_q: u16) -> u16 {
     std::env::var(key)
         .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(default)
+        .and_then(|s| s.trim().parse::<u16>().ok())
+        .filter(|q| *q <= 1000)
+        .unwrap_or(default_q)
 }
 
 /// Pure: parse an ndjson loop ledger, run the confidence schedule, render json=0 HBP rows. Never fires.
-fn render_schedule(body: &str, budget: usize, threshold: f64) -> (u16, String) {
+fn render_schedule(body: &str, budget: usize, threshold_q: u16) -> (u16, String) {
     let mut proposals = Vec::new();
     let mut legacy = 0u64;
     for line in body.lines() {
@@ -171,23 +173,23 @@ fn render_schedule(body: &str, budget: usize, threshold: f64) -> (u16, String) {
             None => legacy += 1,
         }
     }
-    let sched = schedule::confidence_schedule(&proposals, budget, threshold);
+    let sched = schedule::confidence_schedule(&proposals, budget, threshold_q);
     let verify_n = sched.iter().filter(|s| s.verify).count();
     let mut out = format!(
-        "COUNCILSCHEDULE|ok=1|status=staged|read_only=true|scheduler=confidence_scheduled_verify|total={}|verify={}|defer={}|legacy={}|budget={}|threshold={:.3}|fire=false|cutover=false|json=0\n",
+        "COUNCILSCHEDULE|ok=1|status=staged|read_only=true|scheduler=confidence_scheduled_verify|total={}|verify={}|defer={}|legacy={}|budget={}|threshold_q={}|fire=false|cutover=false|json=0\n",
         proposals.len(),
         verify_n,
         proposals.len().saturating_sub(verify_n),
         legacy,
         budget,
-        threshold
+        threshold_q
     );
     for s in &sched {
         out.push_str(&format!(
-            "COUNCILSCHED|rank={}|id={}|confidence={:.4}|action={}|fire=false|json=0\n",
+            "COUNCILSCHED|rank={}|id={}|confidence_q={}|action={}|fire=false|json=0\n",
             s.rank,
             hbp_escape(&s.id),
-            s.confidence,
+            s.confidence_q,
             if s.verify { "VERIFY" } else { "DEFER" }
         ));
     }
@@ -198,14 +200,14 @@ fn render_schedule(body: &str, budget: usize, threshold: f64) -> (u16, String) {
 /// `genius` falls back to `score` (reverse-gain not yet run), `risk` to 0.0. Unparseable -> None.
 fn parse_proposal(line: &str) -> Option<schedule::Proposal> {
     let id = json_str(line, "id")?;
-    let score = json_num(line, "score")?;
-    let genius = json_num(line, "genius").unwrap_or(score);
-    let risk = json_num(line, "risk").unwrap_or(0.0);
+    let score_q = json_unit_q(line, "score")?;
+    let genius_q = json_unit_q(line, "genius").unwrap_or(score_q);
+    let risk_q = json_unit_q(line, "risk").unwrap_or(0);
     Some(schedule::Proposal {
         id,
-        score,
-        genius,
-        risk,
+        score_q,
+        genius_q,
+        risk_q,
     })
 }
 
@@ -233,14 +235,51 @@ fn json_str(s: &str, key: &str) -> Option<String> {
     Some(after[..end].to_string())
 }
 
-fn json_num(s: &str, key: &str) -> Option<f64> {
+/// Parse a JSON number in [0, 1] into q (per-mille, 0..=1000) WITHOUT float: the digit run is
+/// read directly, at most three fractional digits are used, the fourth rounds half-up.
+/// Values above 1 clamp to 1000. Negative -> 0. Exponent notation is rejected (None).
+fn json_unit_q(s: &str, key: &str) -> Option<u16> {
     let after = find_key(s, key)?.trim_start();
     let end = after
-        .find(|c: char| {
-            !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E')
-        })
+        .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+'))
         .unwrap_or(after.len());
-    after[..end].parse::<f64>().ok()
+    let tok = after.get(..end)?.trim();
+    if tok.is_empty() || tok.contains('e') || tok.contains('E') {
+        return None;
+    }
+    let neg = tok.starts_with('-');
+    let tok = tok.trim_start_matches(['-', '+']);
+    let (int_part, frac_part) = match tok.split_once('.') {
+        Some((i, f)) => (i, f),
+        None => (tok, ""),
+    };
+    if !int_part.chars().all(|c| c.is_ascii_digit()) && !int_part.is_empty() {
+        return None;
+    }
+    if !frac_part.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    if neg {
+        return Some(0);
+    }
+    let int_val: u32 = if int_part.is_empty() { 0 } else { int_part.parse().ok()? };
+    if int_val >= 1 {
+        return Some(1000);
+    }
+    // three digits of per-mille, fourth rounds half-up
+    let mut milli: u32 = 0;
+    for (i, c) in frac_part.chars().take(4).enumerate() {
+        let d = c.to_digit(10)?;
+        if i < 3 {
+            milli = milli * 10 + d;
+        } else if d >= 5 {
+            milli += 1;
+        }
+    }
+    for _ in frac_part.chars().count()..3 {
+        milli *= 10;
+    }
+    Some(milli.min(1000) as u16)
 }
 
 fn json_bool(s: &str, key: &str) -> Option<bool> {
@@ -298,7 +337,7 @@ fn parse_lane(line: &str) -> Option<lane_health::LaneEvidence> {
         prompt_accepted: json_bool(line, "prompt_accepted").unwrap_or(false),
         misdelivered: json_bool(line, "misdelivered").unwrap_or(false),
         crashed: json_bool(line, "crashed").unwrap_or(false),
-        elapsed_ms: json_num(line, "elapsed_ms").unwrap_or(0.0) as u64,
+        elapsed_ms: json_u64(line, "elapsed_ms").unwrap_or(0),
         terminal: json_bool(line, "terminal").unwrap_or(false),
     })
 }
@@ -482,13 +521,11 @@ fn parse_branch(line: &str) -> Option<BranchRow> {
     })
 }
 
+/// Non-negative integer field. Uses the PRECISE `json_u64` digit-run parser, not `json_num`:
+/// the former float-routed helper silently corrupted values above 2^53 (the same hazard the FNV
+/// `host_handle8` path already documents). Integer only.
 fn json_nonnegative_u64(s: &str, key: &str) -> Option<u64> {
-    let n = json_num(s, key)?;
-    if n.is_finite() && n >= 0.0 && n.fract() == 0.0 && n <= u64::MAX as f64 {
-        Some(n as u64)
-    } else {
-        None
-    }
+    json_u64(s, key)
 }
 
 /// Pure: parse the branch ledger, assess freshness + recommend the refresh action per branch,
@@ -583,10 +620,9 @@ fn mcp_health_route() -> (u16, String) {
 fn parse_mcp(line: &str) -> Option<mcp_health::Evidence> {
     let lane = json_str(line, "lane")?;
     let capability = json_str(line, "capability").unwrap_or_else(|| lane.clone());
-    let age_ms = match json_num(line, "age_ms") {
-        Some(n) if n >= 0.0 => Some(n as u64),
-        _ => None, // absent or future-dated/negative -> unprovable freshness
-    };
+    // whole milliseconds, precise digit-run parse (integer only). A negative or non-numeric
+    // value fails the parse and reads as absent -> unprovable freshness, same as before.
+    let age_ms = json_u64(line, "age_ms");
     Some(mcp_health::Evidence {
         lane,
         capability,
@@ -599,7 +635,7 @@ fn parse_mcp(line: &str) -> Option<mcp_health::Evidence> {
         fallback_key: json_bool(line, "fallback_key").unwrap_or(false),
         tainted_field: json_str(line, "tainted_field").unwrap_or_else(|| "-".to_string()),
         age_ms,
-        elapsed_ms: json_num(line, "elapsed_ms").unwrap_or(0.0).max(0.0) as u64,
+        elapsed_ms: json_u64(line, "elapsed_ms").unwrap_or(0),
         raw: line.to_string(),
     })
 }
@@ -693,8 +729,9 @@ fn lane_events_route() -> (u16, String) {
     render_lane_events(&body)
 }
 
-/// Precise u64 parse that reads the digit run directly (NOT via the f64 `json_num`, which loses
-/// precision above 2^53 — the full-range FNV `host_handle8` needs exact bits). Absent/non-numeric -> None.
+/// Precise u64 parse that reads the digit run directly. This is the ONLY numeric parser here:
+/// the former float-routed helper is gone, because parsing above 2^53 through a float lost
+/// precision and the full-range FNV `host_handle8` needs exact bits. Absent/non-numeric -> None.
 fn json_u64(s: &str, key: &str) -> Option<u64> {
     let after = find_key(s, key)?.trim_start();
     let end = after
@@ -705,7 +742,7 @@ fn json_u64(s: &str, key: &str) -> Option<u64> {
 
 /// Parse one ndjson event row -> lane_event::Event. Requires `lane`; `host_handle8` absent -> 0 (=>
 /// provenance Derived, not Verified); seq/lamport absent -> 0; hash absent -> "". u64 fields use the
-/// precise `json_u64` (no f64 precision loss). Unparseable (no lane) -> None.
+/// precise `json_u64` (exact digit run, integer only). Unparseable (no lane) -> None.
 fn parse_event(line: &str) -> Option<lane_event::Event> {
     let lane = json_str(line, "lane")?;
     // host_handle8: absent -> 0 (Derived). But a key that is PRESENT yet unparseable (negative /
@@ -1046,8 +1083,8 @@ mod tests {
             Some(true)
         );
         assert_eq!(
-            json_num(r#"{"label":"score","score":0.5}"#, "score"),
-            Some(0.5)
+            json_unit_q(r#"{"label":"score","score":0.5}"#, "score"),
+            Some(500)
         );
         // a key that only ever appears as a value (never a real key) -> None, not the value text
         assert_eq!(json_u64(r#"{"hash":"seq"}"#, "seq"), None);
@@ -1521,7 +1558,7 @@ mod lane_events_route_tests {
 
     #[test]
     fn json_u64_is_precise_above_2_53() {
-        // FNV handles exceed 2^53; f64-routed parsing would corrupt them — json_u64 must be exact.
+        // FNV handles exceed 2^53; float-routed parsing would corrupt them — json_u64 is exact.
         let big = 0xcbf2_9ce4_8422_2325u64; // 14695981039346656037
         let line = format!(r#"{{"host_handle8":{big}}}"#);
         assert_eq!(json_u64(&line, "host_handle8"), Some(big));
