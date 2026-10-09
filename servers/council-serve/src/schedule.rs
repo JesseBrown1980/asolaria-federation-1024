@@ -15,7 +15,7 @@
 //! `Scheduled::fire` is always false here; actual firing stays the gated, operator-emit step.
 
 /// A pending proposal to be (maybe) verified. Fields are cheap signals already produced upstream:
-/// `score` = GNN ranking confidence, `genius`/`risk` = reverse-gain rates. All in [0,1].
+/// `score_q` = GNN ranking confidence, `genius_q`/`risk_q` = reverse-gain rates, per-mille.
 #[derive(Debug, Clone)]
 pub struct Proposal {
     pub id: String,
@@ -43,7 +43,11 @@ pub fn expected_acceptance_q(p: &Proposal) -> u16 {
     // integer divide of the summed pair, so no per-term rounding.
     let lift = (p.score_q as u32 + p.genius_q as u32) / 2;
     let v = lift.saturating_sub(p.risk_q as u32);
-    if v > 1000 { 1000 } else { v as u16 }
+    if v > 1000 {
+        1000
+    } else {
+        v as u16
+    }
 }
 
 /// Rank proposals by expected acceptance (desc, stable tiebreak by id); select the top `verify_budget`
@@ -88,9 +92,9 @@ mod tests {
     fn p(id: &str, score_q: u16, genius_q: u16, risk_q: u16) -> Proposal {
         Proposal {
             id: id.to_string(),
-            score,
-            genius,
-            risk,
+            score_q,
+            genius_q,
+            risk_q,
         }
     }
 
@@ -105,7 +109,7 @@ mod tests {
 
     #[test]
     fn ranks_high_survival_first() {
-        let props = [p("low", 0.1, 0.1, 0.0), p("high", 0.9, 0.9, 0.0)];
+        let props = [p("low", 100, 100, 0), p("high", 900, 900, 0)];
         let s = confidence_schedule(&props, 2, 0);
         assert_eq!(s[0].id, "high");
         assert_eq!(s[0].rank, 0);
@@ -115,9 +119,9 @@ mod tests {
     #[test]
     fn verify_budget_is_respected() {
         let props = [
-            p("a", 0.9, 0.9, 0.0),
-            p("b", 0.8, 0.8, 0.0),
-            p("c", 0.7, 0.7, 0.0),
+            p("a", 900, 900, 0),
+            p("b", 800, 800, 0),
+            p("c", 700, 700, 0),
         ];
         let s = confidence_schedule(&props, 2, 0);
         assert_eq!(
@@ -132,7 +136,7 @@ mod tests {
     #[test]
     fn threshold_prevents_wasted_verify_on_low_survival() {
         // budget is generous but everything is below threshold -> nothing verified (no waste)
-        let props = [p("a", 0.2, 0.2, 0.0), p("b", 0.1, 0.1, 0.0)];
+        let props = [p("a", 200, 200, 0), p("b", 100, 100, 0)];
         let s = confidence_schedule(&props, 10, 500);
         assert_eq!(
             s.iter().filter(|x| x.verify).count(),
@@ -143,7 +147,7 @@ mod tests {
 
     #[test]
     fn schedule_never_fires() {
-        let props = [p("a", 1.0, 1.0, 0.0), p("b", 0.9, 0.9, 0.0)];
+        let props = [p("a", 1000, 1000, 0), p("b", 900, 900, 0)];
         let s = confidence_schedule(&props, 10, 0);
         assert!(
             s.iter().all(|x| !x.fire),
@@ -153,13 +157,13 @@ mod tests {
 
     #[test]
     fn empty_is_empty_not_faked() {
-        let s = confidence_schedule(&[], 8, 0.5);
+        let s = confidence_schedule(&[], 8, 500);
         assert!(s.is_empty());
     }
 
     #[test]
     fn dspark_property_high_score_low_risk_beats_low_score_high_risk() {
-        let props = [p("weak", 0.3, 0.3, 0.4), p("strong", 0.85, 0.85, 0.05)];
+        let props = [p("weak", 300, 300, 400), p("strong", 850, 850, 50)];
         let s = confidence_schedule(&props, 1, 500);
         let strong = s.iter().find(|x| x.id == "strong").unwrap();
         let weak = s.iter().find(|x| x.id == "weak").unwrap();

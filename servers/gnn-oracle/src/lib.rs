@@ -238,7 +238,11 @@ impl GnnInference {
             })
             .collect();
         // integer ordering — total, no partial_cmp/NaN case to handle
-        ranked.sort_by(|a, b| b.score_q.cmp(&a.score_q).then_with(|| a.item_id.cmp(&b.item_id)));
+        ranked.sort_by(|a, b| {
+            b.score_q
+                .cmp(&a.score_q)
+                .then_with(|| a.item_id.cmp(&b.item_id))
+        });
         ranked.truncate(n);
         Ok(ranked)
     }
@@ -429,6 +433,7 @@ mod tests {
     use alloc::vec;
 
     #[test]
+    #[allow(non_snake_case)] // "16M" = 16 million, the name carries the number
     fn gnn_edges_target_is_2_16M() {
         assert_eq!(GNN_EDGES_TARGET, 2_158_671);
     }
@@ -607,7 +612,7 @@ mod tests {
         let s = DeterministicScorer;
         let a = s.score_q(b"hello world");
         assert_eq!(a, s.score_q(b"hello world"), "deterministic");
-        assert!((0.0..=1.0).contains(&a), "bounded to [0,1]");
+        assert!(a <= 1000, "bounded to 0..=1000 per-mille");
         assert_eq!(s.score_q(b""), 0);
     }
 }

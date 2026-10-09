@@ -139,7 +139,7 @@ fn schedule_route() -> (u16, String) {
     render_schedule(
         &body,
         env_usize("ASOLARIA_VERIFY_BUDGET", 8),
-        env_q("ASOLARIA_ACCEPT_THRESHOLD", 0.5),
+        env_q("ASOLARIA_ACCEPT_THRESHOLD", 500),
     )
 }
 
@@ -197,7 +197,7 @@ fn render_schedule(body: &str, budget: usize, threshold_q: u16) -> (u16, String)
 }
 
 /// Parse one ndjson loop-ledger line into a Proposal. Requires `id` + `score` (GNN confidence);
-/// `genius` falls back to `score` (reverse-gain not yet run), `risk` to 0.0. Unparseable -> None.
+/// `genius` falls back to `score` (reverse-gain not yet run), `risk` to 0. Unparseable -> None.
 fn parse_proposal(line: &str) -> Option<schedule::Proposal> {
     let id = json_str(line, "id")?;
     let score_q = json_unit_q(line, "score")?;
@@ -262,7 +262,11 @@ fn json_unit_q(s: &str, key: &str) -> Option<u16> {
     if neg {
         return Some(0);
     }
-    let int_val: u32 = if int_part.is_empty() { 0 } else { int_part.parse().ok()? };
+    let int_val: u32 = if int_part.is_empty() {
+        0
+    } else {
+        int_part.parse().ok()?
+    };
     if int_val >= 1 {
         return Some(1000);
     }
@@ -737,6 +741,11 @@ fn json_u64(s: &str, key: &str) -> Option<u64> {
     let end = after
         .find(|c: char| !c.is_ascii_digit())
         .unwrap_or(after.len());
+    // A digit run followed by a fraction or exponent ("1.5", "2e3") is NOT an integer: reject it
+    // instead of silently truncating to the leading digits.
+    if matches!(after[end..].chars().next(), Some('.' | 'e' | 'E')) {
+        return None;
+    }
     after.get(..end)?.parse::<u64>().ok()
 }
 
@@ -1186,9 +1195,9 @@ mod schedule_route_tests {
     fn parse_proposal_reads_score_and_defaults_genius_to_score() {
         let p = parse_proposal(r#"{"id":"x1","score":0.8,"risk":0.1}"#).unwrap();
         assert_eq!(p.id, "x1");
-        assert!((p.score - 0.8).abs() < 1e-9);
-        assert!((p.genius - 0.8).abs() < 1e-9); // genius falls back to score
-        assert!((p.risk - 0.1).abs() < 1e-9);
+        assert_eq!(p.score_q, 800);
+        assert_eq!(p.genius_q, 800); // genius falls back to score
+        assert_eq!(p.risk_q, 100);
         assert!(parse_proposal(r#"{"no_id":true}"#).is_none());
         assert!(parse_proposal("not json").is_none());
     }
@@ -1196,7 +1205,7 @@ mod schedule_route_tests {
     #[test]
     fn render_schedule_rations_verify_and_never_fires() {
         let ledger = "{\"id\":\"hi\",\"score\":0.9,\"genius\":0.9}\n{\"id\":\"lo\",\"score\":0.1,\"genius\":0.1}\n";
-        let (code, body) = render_schedule(ledger, 1, 0.5);
+        let (code, body) = render_schedule(ledger, 1, 500);
         assert_eq!(code, 200);
         assert!(body.contains("scheduler=confidence_scheduled_verify"));
         assert!(body.contains("total=2"));
@@ -1211,7 +1220,7 @@ mod schedule_route_tests {
 
     #[test]
     fn render_schedule_empty_ledger_is_clean_zero_not_faked() {
-        let (code, body) = render_schedule("", 8, 0.5);
+        let (code, body) = render_schedule("", 8, 500);
         assert_eq!(code, 200);
         assert!(body.contains("total=0"));
         assert!(body.contains("verify=0"));
