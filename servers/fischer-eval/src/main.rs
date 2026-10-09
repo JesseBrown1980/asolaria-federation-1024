@@ -6,8 +6,8 @@ use std::process;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use asolaria_server_fischer_eval::{
-    evaluate, hbp_escape, parse_bool, parse_f64, render_hbi, render_row, sha8, FischerEnvelope,
-    FischerScore,
+    evaluate, hbp_escape, parse_bool, parse_decimal_q, parse_q, render_hbi, render_row, sha8,
+    FischerEnvelope, FischerScore,
 };
 
 const DEFAULT_BIND: &str = "127.0.0.1:5089";
@@ -214,7 +214,12 @@ fn fields_to_eval(
     let score = FischerScore {
         composite: val(fields, "composite", "0"),
         l0_real: parse_bool(opt_str(fields, "l0_real").as_deref()),
-        shannon: parse_f64(opt_str(fields, "shannon").as_deref(), 0.0),
+        // Integer only: an explicit per-mille `shannon_q` wins; else the legacy decimal
+        // `shannon=0.55` is parsed as text into per-mille (no float).
+        shannon_q: match opt_str(fields, "shannon_q") {
+            Some(q) => parse_q(Some(q.as_str()), 0),
+            None => parse_decimal_q(opt_str(fields, "shannon").as_deref(), 0),
+        },
         g4_state: val(fields, "g4_state", "UNKNOWN"),
     };
     let strict = parse_bool(opt_str(fields, "strict").as_deref());

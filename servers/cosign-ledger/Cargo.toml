@@ -2,7 +2,7 @@
 name = "asolaria-server-cosign-ledger"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.81"
 license = "MIT OR Apache-2.0"
 authors = ["Asolaria Federation"]
 description = "Asolaria userspace server · cosign-chain storage ledger · Phase-2.5 demote target for kernel/core/src/cosign_chain/ (storage half)"

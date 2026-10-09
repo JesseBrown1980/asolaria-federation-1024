@@ -1,0 +1,201 @@
+name: Rust 1.81 + clippy (operator toolchain rule)
+
+# OPERATOR RULE: Rust 1.81 with clippy, integer/ternary only, no float.
+# This workflow replaces the previous rust-1.97-independent-verification.yml.
+# The 1.97 receipts remain in docs/ as HISTORICAL evidence of past runs; they
+# are not the toolchain of record.
+#
+# Every check is THREE-VALUED (AGENT-DISCIPLINE.md section 12):
+#   MEASURED_PASS | MEASURED_FAIL | NOT_MEASURED + a mandatory reason.
+# A check that could not run is NOT_MEASURED -- never red, and never a silent
+# green either: the reason is printed and carried into the receipt, and the
+# final step fails only on MEASURED_FAIL.
+#
+# Two faults in the previous version, both of which this fixes. Both were found
+# by the gate itself behaving exactly as section 12 says a gate must not:
+#   1. clippy reported MEASURED_FAIL on a repo with no crate at the root, so a
+#      repo that could not be measured was marked broken.
+#   2. the float grep printed "OK: zero float types" when src/ did not exist --
+#      a pass declared after scanning zero files. If every float in the corpus
+#      appeared tomorrow in a repo with no src/, that step would still be green.
+#      It could not fail, so it proved nothing.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      # FIX: RUSTUP_TOOLCHAIN outranks BOTH a directory override and any nested
+      # rust-toolchain.toml. intelligent-terminal carries a nested
+      # channel = "ms-prod-1.93" (third-party, MSRustup-resolved) that would
+      # otherwise decide the toolchain for every crate under tools/wta/.
+      RUSTUP_TOOLCHAIN: "1.81.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.81.0 with clippy
+        run: |
+          rustup toolchain install 1.81.0 --profile minimal --component clippy
+          rustup override set 1.81.0
+          rustc --version
+          cargo clippy --version
+
+      - name: Locate the crate
+        id: crate
+        run: |
+          set -u
+          if [ -f Cargo.toml ]; then
+            echo "found=1" >> "$GITHUB_OUTPUT"
+            echo "manifest=./Cargo.toml" >> "$GITHUB_OUTPUT"
+            echo "CRATE|status=MEASURED|path=./Cargo.toml"
+          else
+            found=$(find . -name Cargo.toml -not -path './target/*' -print -quit 2>/dev/null || true)
+            if [ -n "$found" ]; then
+              echo "found=1" >> "$GITHUB_OUTPUT"
+              echo "manifest=$found" >> "$GITHUB_OUTPUT"
+              echo "CRATE|status=MEASURED|path=$found"
+            else
+              echo "found=0" >> "$GITHUB_OUTPUT"
+              echo "CRATE|status=NOT_MEASURED|reason=NO_CRATE_IN_REPOSITORY"
+            fi
+          fi
+
+      - name: Clippy (deny warnings) — enforces integer/ternary discipline
+        id: clippy
+        run: |
+          set -u
+          if [ "${{ steps.crate.outputs.found }}" != "1" ]; then
+            echo "CLIPPY|status=NOT_MEASURED|reason=NO_CRATE_IN_REPOSITORY"
+            echo "verdict=NOT_MEASURED" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # FIX: run against the manifest that step "crate" located. Without
+          # --manifest-path this ran at the repository root, so every repo whose
+          # crate lives in a subdirectory reported MEASURED_FAIL for "no
+          # Cargo.toml" -- a red gate that said nothing about clippy.
+          if cargo clippy --manifest-path "${{ steps.crate.outputs.manifest }}" --all-targets -- -D warnings; then
+            echo "CLIPPY|status=MEASURED_PASS"
+            echo "verdict=MEASURED_PASS" >> "$GITHUB_OUTPUT"
+          else
+            echo "CLIPPY|status=MEASURED_FAIL"
+            echo "verdict=MEASURED_FAIL" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Assert no float types in sources
+        id: floats
+        run: |
+          set -u
+          # Count what was actually scanned. A grep that matched nothing because
+          # it looked at nothing is NOT a pass.
+          files=$(find . -name '*.rs' -not -path './target/*' | wc -l)
+          if [ "$files" -eq 0 ]; then
+            echo "FLOATS|status=NOT_MEASURED|reason=NO_RUST_SOURCES|scanned=0"
+            echo "verdict=NOT_MEASURED" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # FIX: the two declared exemptions are honoured here, and every
+          # exempt file is PRINTED BY NAME so nothing hides behind a marker.
+          # A marker only counts in the first 5 lines of the file -- a
+          # file-level declaration, not a comment buried next to a float.
+          exempt=0
+          : > /tmp/float-hits.txt
+          while IFS= read -r f; do
+            n=$(grep -cE '\bf(32|64)\b' "$f" || true)
+            [ "${n:-0}" -eq 0 ] && continue
+            if head -5 "$f" | grep -q 'FLOAT-WITNESS-EXEMPT\|FLOAT-WIRE-BOUNDARY-EXEMPT'; then
+              marker=$(head -5 "$f" | grep -o 'FLOAT-WITNESS-EXEMPT\|FLOAT-WIRE-BOUNDARY-EXEMPT' | head -1)
+              echo "FLOAT_EXEMPT|file=$f|hits=$n|marker=$marker"
+              exempt=$((exempt + n))
+            else
+              # FIX: strip // line comments before judging. A comment that SAYS
+              # "no f64" is a true statement about integer discipline, not a
+              # violation of it -- hp_mix.rs line 6 is exactly that, and the
+              # naive grep called it a float. Markers are read from the raw
+              # file above, so stripping here cannot hide an exemption.
+              # Strip ONLY whole-line comments (^ whitespace then // or //!).
+              # A trailing comment is left alone on purpose: sed cannot tell
+              # `let s = "http://x"; let y: f64 = 1.0;` from a real comment, and
+              # losing a line of code to a URL is the worse failure. Whole-line
+              # stripping cannot delete code, so it has no hole.
+              grep -nE '\bf(32|64)\b' "$f" | grep -vE '^[0-9]+:[[:space:]]*//' \
+                | sed "s|^|$f:|" >> /tmp/float-hits.txt || true
+            fi
+          done < <(find . -name '*.rs' -not -path './target/*')
+          unexempt=$(wc -l < /tmp/float-hits.txt)
+          if [ "$unexempt" -gt 0 ]; then
+            cat /tmp/float-hits.txt
+            echo "FLOATS|status=MEASURED_FAIL|scanned=$files|exempt=$exempt|unexempt=$unexempt|reason=FLOAT_TYPE_PRESENT"
+            echo "verdict=MEASURED_FAIL" >> "$GITHUB_OUTPUT"
+          else
+            echo "FLOATS|status=MEASURED_PASS|scanned=$files|exempt=$exempt|unexempt=0"
+            echo "verdict=MEASURED_PASS" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Tests
+        id: tests
+        run: |
+          set -u
+          if [ "${{ steps.crate.outputs.found }}" != "1" ]; then
+            echo "TESTS|status=NOT_MEASURED|reason=NO_CRATE_IN_REPOSITORY"
+            echo "verdict=NOT_MEASURED" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if cargo test --manifest-path "${{ steps.crate.outputs.manifest }}" --all-targets -- --nocapture; then
+            echo "TESTS|status=MEASURED_PASS"
+            echo "verdict=MEASURED_PASS" >> "$GITHUB_OUTPUT"
+          else
+            echo "TESTS|status=MEASURED_FAIL"
+            echo "verdict=MEASURED_FAIL" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Receipt
+        run: |
+          set -u
+          {
+            echo "toolchain_of_record=1.81.0"
+            echo "rustc=$(rustc --version)"
+            echo "clippy=$(cargo clippy --version)"
+            echo "rule=integer_and_ternary_only_no_float"
+            echo "manifest=${{ steps.crate.outputs.manifest }}"
+            echo "clippy_verdict=${{ steps.clippy.outputs.verdict }}"
+            echo "floats_verdict=${{ steps.floats.outputs.verdict }}"
+            echo "tests_verdict=${{ steps.tests.outputs.verdict }}"
+          } > toolchain-receipt.txt
+          cat toolchain-receipt.txt
+
+      - name: Gate — fail only on MEASURED_FAIL
+        run: |
+          set -u
+          fails=0
+          for v in "${{ steps.clippy.outputs.verdict }}" \
+                   "${{ steps.floats.outputs.verdict }}" \
+                   "${{ steps.tests.outputs.verdict }}"; do
+            [ "$v" = "MEASURED_FAIL" ] && fails=$((fails+1))
+          done
+          notm=0
+          for v in "${{ steps.clippy.outputs.verdict }}" \
+                   "${{ steps.floats.outputs.verdict }}" \
+                   "${{ steps.tests.outputs.verdict }}"; do
+            [ "$v" = "NOT_MEASURED" ] && notm=$((notm+1))
+          done
+          echo "GATE|measured_fail=$fails|not_measured=$notm"
+          if [ "$fails" -gt 0 ]; then
+            echo "GATE|result=RED|reason=a check ran and failed"
+            exit 1
+          fi
+          if [ "$notm" -eq 3 ]; then
+            # Nothing was measurable. That is a reportable state, not a pass to
+            # be waved through, and not a failure either. Say so loudly.
+            echo "GATE|result=NOT_MEASURED|reason=no check in this repository could run"
+            exit 0
+          fi
+          echo "GATE|result=GREEN|every check that could run, passed"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-1.81-clippy-receipt
+          path: toolchain-receipt.txt

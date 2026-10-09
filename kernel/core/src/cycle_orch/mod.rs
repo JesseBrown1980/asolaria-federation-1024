@@ -144,7 +144,8 @@ impl PeerStateMachine {
 pub struct SloThresholds {
     pub mem_free_mb_floor: u32,
     pub mem_duration_ms_floor: u32,
-    pub err_rate_threshold: f32,
+    /// Error-rate halt threshold in PERMILLE (integer only; 100 = 10%).
+    pub err_rate_threshold_permille: u16,
     pub err_window_ms: u32,
     pub err_min_samples: u32,
     pub law_window_ms: u32,
@@ -160,7 +161,7 @@ impl Default for SloThresholds {
         Self {
             mem_free_mb_floor: 200,
             mem_duration_ms_floor: 30_000,
-            err_rate_threshold: 0.10,
+            err_rate_threshold_permille: 100,
             err_window_ms: 60_000,
             err_min_samples: 5,
             law_window_ms: 60_000,
@@ -271,7 +272,7 @@ mod tests {
     fn slo_thresholds_match_canon_defaults() {
         let t = SloThresholds::default();
         assert_eq!(t.mem_free_mb_floor, 200);
-        assert_eq!(t.err_rate_threshold, 0.10);
+        assert_eq!(t.err_rate_threshold_permille, 100);
         assert_eq!(t.flap_threshold, 5);
         assert_eq!(t.cadence_floor_ms, 5_000);
     }
