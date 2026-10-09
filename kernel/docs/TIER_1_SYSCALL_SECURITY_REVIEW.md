@@ -93,6 +93,7 @@ This is a **pre-implementation freeze** review — the purpose is to attach expl
 - **Threat:** hookwall self-bypass; pre-hook returning fake PROCEED via spoofed `HookContext`.
 - **Mitigation now:** `HookContext` synthesized from envelope bytes prefix (byte[0]=slot, byte[1]=syscall_no); pure context-classification, zero state.
 - **Residual risk:** if userspace can craft envelope-bytes that synthesize the wrong slot/syscall_no, classification is wrong.
+- **2026-10-09 (beside):** this residual risk was live in init: the raw envelope's ASCII type byte landed in the slot byte (>= 64), so every init dispatch was out of range -> Block. Init now passes `[syscall_no - 1, syscall_no]`; the sender no longer picks the slot. Effect: init dispatches went from accidental block-all to the hookwall's own policy (Micro -> Proceed).
 - **Phase-3 hardening:** hookwall slot lookup is read-only from kernel-resident policy table; userspace cannot mutate. Add slot-range bounds check (slot < 16). Cosign-chain row on every BLOCK verdict (already in canon).
 
 ### sys_hookwall_post (13) · WIRED ✓

@@ -320,6 +320,7 @@ fn emit_device_pid(t: &HwTuple) -> [u8; 32] {
 pub(crate) struct HwSummary {
     pub device_digest: [u8; 32],
     pub rst_vmd: bool,
+    pub devices: u32,
 }
 
 /// Enumerate PCI config space, print each present device over serial, and mint the
@@ -382,6 +383,7 @@ pub unsafe fn pci_scan() -> HwSummary {
                     return HwSummary {
                         device_digest,
                         rst_vmd: tuple.rst_vmd,
+                        devices: tuple.count,
                     };
                 }
             }
@@ -392,5 +394,6 @@ pub unsafe fn pci_scan() -> HwSummary {
     HwSummary {
         device_digest,
         rst_vmd: tuple.rst_vmd,
+        devices: tuple.count,
     }
 }

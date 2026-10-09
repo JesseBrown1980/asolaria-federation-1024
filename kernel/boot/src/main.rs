@@ -2,6 +2,7 @@
 #![no_main]
 
 mod bootproj;
+mod console;
 mod driver_rst_vmd;
 mod hwinv;
 mod init;
@@ -290,6 +291,7 @@ pub extern "efiapi" fn efi_main(
     system_table: *mut core::ffi::c_void,
 ) -> usize {
     let system_table = system_table as *mut EfiSystemTable;
+    let facts: console::BootFacts;
     unsafe {
         // Serial (headless/QEMU) — guaranteed visible regardless of ConOut routing.
         serial_init();
@@ -305,6 +307,16 @@ pub extern "efiapi" fn efi_main(
         let boot_pid = bootproj::emit(&hw.device_digest, &bt);
         // Device-gated + time-stamped storage-driver scaffold (engages only on 8086:282A).
         driver_rst_vmd::probe(&hw, &boot_pid, &bt);
+        let mut utc = [0u8; 20];
+        let utc_len = bt.write_utc(&mut utc);
+        facts = console::BootFacts {
+            device_digest: hw.device_digest,
+            boot_pid,
+            utc,
+            utc_len,
+            pci_devices: hw.devices,
+            rst_vmd: hw.rst_vmd,
+        };
         // Graphics console (real monitor / GOP) — same banner.
         uefi_print(
             system_table,
@@ -331,7 +343,8 @@ pub extern "efiapi" fn efi_main(
                     let pps = (*info).pixels_per_scan_line;
                     let fmt = (*info).pixel_format;
                     let fb = (*mode).framebuffer_base as *mut u32;
-                    if !fb.is_null() && w >= 320 && h >= 200 {
+                    // fmt 3 = PixelBltOnly: no linear framebuffer, never write it directly.
+                    if !fb.is_null() && fmt < 3 && w >= 320 && h >= 200 {
                         let bg = pack(fmt, 0x05, 0x07, 0x0D);
                         let cyan = pack(fmt, 0x43, 0xE8, 0xD8);
                         let amber = pack(fmt, 0xFF, 0xB4, 0x54);
@@ -359,8 +372,9 @@ pub extern "efiapi" fn efi_main(
         let heap_ptr = core::ptr::addr_of_mut!(HEAP);
         ALLOCATOR.init(heap_ptr as *mut u8 as usize, HEAP_SIZE);
     }
-    // Phase-2 Step 31 — boot to envelope-shell via minimal init system.
-    // init::run() returns `!`; as the tail expression its `!` coerces to the efiapi Status
-    // return. Firmware never regains control.
-    init::run()
+    // 2026-10-09: boot to the ON-SCREEN console (keyboard -> init envelope dispatch -> screen),
+    // not the headless `init::run()` loop that had no input and drew nothing (the "stuck on the
+    // loading screen" boot). The console also disables the UEFI watchdog. Diverges.
+    // SAFETY: system_table is the firmware-provided table, valid while boot services are active.
+    unsafe { console::run(system_table, &facts) }
 }
