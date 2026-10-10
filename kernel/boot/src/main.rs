@@ -9,6 +9,7 @@ mod font;
 mod gfx;
 mod gui;
 mod hwinv;
+mod i2chid;
 mod init;
 mod pointer;
 mod ps2mouse;

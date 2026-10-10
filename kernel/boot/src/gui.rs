@@ -395,14 +395,44 @@ impl Desk<'_, '_> {
             .raw(b"\r\n");
         // SAFETY: COM1 port I/O.
         unsafe { crate::serial_print(b.get()) };
+        if let Some(r) = self.ptr.i2c_report {
+            for k in 0..2 {
+                let mut b = Buf::new();
+                b.s(b"  GUI|op=i2c_hid|");
+                if k == 0 {
+                    crate::apps::i2c_line1(&mut b, &r);
+                } else {
+                    crate::apps::i2c_line2(&mut b, &r);
+                }
+                b.s(b"|json=0").raw(b"\r\n");
+                // SAFETY: COM1 port I/O.
+                unsafe { crate::serial_print(b.get()) };
+            }
+        }
     }
 
     fn ptr_note(&self) -> &'static [u8] {
+        if self.ptr.i2c_active() {
+            return b"driver: kernel I2C-HID touchpad";
+        }
         if self.ptr.ps2_active() {
             return b"driver: kernel PS/2";
         }
         if self.ptr.phys > 0 {
             return b"driver: firmware";
+        }
+        if let Some(r) = self.ptr.i2c_report {
+            if r.stage != crate::i2chid::Stage::Ready && r.controllers > 0 {
+                return match r.stage {
+                    crate::i2chid::Stage::BarUnassigned => b"I2C-HID: controller has no BAR",
+                    crate::i2chid::Stage::NotDesignWare => b"I2C-HID: controller did not answer",
+                    crate::i2chid::Stage::NoDevice => b"I2C-HID: no touchpad answered",
+                    crate::i2chid::Stage::NoMouseCollection => {
+                        b"I2C-HID: touchpad has no mouse mode"
+                    }
+                    _ => b"I2C-HID: not ready",
+                };
+            }
         }
         match self.ptr.ps2_probe {
             Some(crate::ps2mouse::Probe::NoAck) => b"PS/2: no mouse answered",
@@ -1177,6 +1207,7 @@ impl Desk<'_, '_> {
             ptr_splitter: self.ptr.via_splitter,
             usb_connected: self.ptr.connected_usb,
             ptr_note: note,
+            i2c: self.ptr.i2c_report,
             kbd_pointer: self.kptr,
             mem: self.mem,
             tsc_khz: self.tpms,
@@ -1375,6 +1406,8 @@ impl Desk<'_, '_> {
                     self.motion_logged = true;
                     let src: &[u8] = if ev.abs.is_some() {
                         b"src=absolute"
+                    } else if self.ptr.i2c_active() {
+                        b"src=i2c_hid"
                     } else if self.ptr.ps2_active() {
                         b"src=ps2"
                     } else {

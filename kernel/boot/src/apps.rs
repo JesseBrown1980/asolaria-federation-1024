@@ -271,6 +271,8 @@ pub(crate) struct View<'a> {
     pub usb_connected: usize,
     /// Which driver feeds the pointer (firmware devices, the kernel's PS/2 driver, or none).
     pub ptr_note: &'static [u8],
+    /// What the kernel's I2C-HID touchpad probe saw (None when firmware devices were found).
+    pub i2c: Option<crate::i2chid::Report>,
     pub kbd_pointer: bool,
     pub mem: Option<(u64, u64)>,
     pub tsc_khz: u64,
@@ -700,6 +702,55 @@ pub(crate) fn pointer_line(b: &mut Buf, v: &View) {
     }
 }
 
+/// "Touchpad  I2C-HID ready  ctl 0:15.1 8086:a369 bar .. comp .. D3->D0" (probe outcome).
+pub(crate) fn i2c_line1(b: &mut Buf, r: &crate::i2chid::Report) {
+    b.s(b"Touchpad   I2C-HID ")
+        .s(r.stage.text())
+        .s(b"  controllers ")
+        .dec(r.controllers as u64);
+    if r.controllers > 0 {
+        b.s(b"  last 0:")
+            .hex(&[r.dev])
+            .s(b".")
+            .dec(r.fun as u64)
+            .s(b" 8086:")
+            .hex16(r.did)
+            .s(b"  bar ")
+            .hex(&r.bar.to_be_bytes())
+            .s(b"  comp ")
+            .hex(&r.comp_type.to_be_bytes())
+            .s(b"  was D")
+            .dec(r.pm_was as u64);
+    }
+}
+
+/// "  addr 2c  hid 06cb:7db5  rdesc 693  max_in 30  mouse id 2  gpio ..." (device side).
+pub(crate) fn i2c_line2(b: &mut Buf, r: &crate::i2chid::Report) {
+    b.s(b"           addr ")
+        .hex(&[r.addr])
+        .s(b"  hid ")
+        .hex16(r.vid)
+        .s(b":")
+        .hex16(r.pid)
+        .s(b"  rdesc ")
+        .dec(r.rdesc_len as u64)
+        .s(b"  max_in ")
+        .dec(r.max_in as u64)
+        .s(b"  mouse_id ")
+        .dec(r.mouse_id as u64)
+        .s(b"  abort ")
+        .hex(&r.last_abort.to_be_bytes())
+        .s(b"  gpio padbar ")
+        .hex(&r.gpio_padbar.to_be_bytes())
+        .s(b" dw0 ")
+        .hex(&r.gpio_dw0.to_be_bytes())
+        .s(if r.gpio_used {
+            b" irq-gated"
+        } else {
+            b" blind-poll"
+        });
+}
+
 pub(crate) fn hms(b: &mut Buf, s: u64) {
     b.dec(s / 3600)
         .s(b":")
@@ -815,6 +866,18 @@ fn draw_devices(cv: &mut Canvas, body: Rect, v: &View, scroll: i32) {
         1,
     );
     y += lh;
+    if let Some(r) = v.i2c {
+        let ok = r.stage == crate::i2chid::Stage::Ready;
+        let c = if ok { GREEN } else { AMBER };
+        b = Buf::new();
+        i2c_line1(&mut b, &r);
+        cv.text(x, y, b.get(), c, 1);
+        y += lh;
+        b = Buf::new();
+        i2c_line2(&mut b, &r);
+        cv.text(x, y, b.get(), c, 1);
+        y += lh;
+    }
     let st: &[u8] = if v.facts.rst_vmd {
         b"Storage    Intel RST/VMD 8086:282A gate MATCHED (scaffold: VMD walk is the next step)"
     } else {
