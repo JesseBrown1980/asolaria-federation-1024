@@ -30,6 +30,7 @@ members = [
     "servers/dashboard-serve",
     "tools/recall-serve",
     "tools/hookwall-session-start",
+    "tools/hookwall-edge",
 ]
 
 [workspace.package]
