@@ -1,12 +1,19 @@
 #![no_std]
 #![no_main]
 
+mod apps;
 mod bootproj;
 mod console;
 mod driver_rst_vmd;
+mod font;
+mod gfx;
+mod gui;
 mod hwinv;
 mod init;
+mod pointer;
+mod ps2mouse;
 mod rtc;
+mod uefi;
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::panic::PanicInfo;
@@ -321,6 +328,7 @@ pub extern "efiapi" fn efi_main(
             utc_len,
             pci_devices: hw.devices,
             rst_vmd: hw.rst_vmd,
+            pci: hw.list,
         };
         // Graphics console (real monitor / GOP) — same banner.
         uefi_print(
@@ -379,6 +387,8 @@ pub extern "efiapi" fn efi_main(
         let heap_ptr = core::ptr::addr_of_mut!(HEAP);
         ALLOCATOR.init(heap_ptr as *mut u8 as usize, HEAP_SIZE);
     }
+    // 2026-10-10: the console hands the screen to the graphical desktop (`gui`) when GOP gives a
+    // usable framebuffer, else stays a text console.
     // 2026-10-09: boot to the ON-SCREEN console (keyboard -> init envelope dispatch -> screen),
     // not the headless `init::run()` loop that had no input and drew nothing (the "stuck on the
     // loading screen" boot). The console also disables the UEFI watchdog. Diverges.

@@ -324,7 +324,32 @@ pub(crate) struct HwSummary {
     pub device_digest: [u8; 32],
     pub rst_vmd: bool,
     pub devices: u32,
+    /// The enumerated device-functions, in bus/dev/func order (first `devices` are valid),
+    /// kept for the desktop's Devices window.
+    pub list: [PciDev; DEVICE_CAP as usize],
 }
+
+/// One enumerated PCI device-function (read-only facts from config space).
+#[derive(Clone, Copy)]
+pub(crate) struct PciDev {
+    pub bus: u8,
+    pub dev: u8,
+    pub func: u8,
+    pub vendor: u16,
+    pub device: u16,
+    pub class: u8,
+    pub subclass: u8,
+}
+
+const NO_DEV: PciDev = PciDev {
+    bus: 0,
+    dev: 0,
+    func: 0,
+    vendor: 0xFFFF,
+    device: 0xFFFF,
+    class: 0xFF,
+    subclass: 0xFF,
+};
 
 /// Enumerate PCI config space, print each present device over serial, and mint the
 /// `device_pid`. Read-only re device state; E=0. Returns the [`HwSummary`].
@@ -334,6 +359,7 @@ pub(crate) struct HwSummary {
 pub unsafe fn pci_scan() -> HwSummary {
     serial_print(b"  hwinv . PCI enumeration (0xCF8/0xCFC, read-only)\r\n");
     let mut tuple = HwTuple::new();
+    let mut list = [NO_DEV; DEVICE_CAP as usize];
     for bus in 0u16..=255 {
         let bus = bus as u8;
         for dev in 0u8..32 {
@@ -379,6 +405,17 @@ pub unsafe fn pci_scan() -> HwSummary {
                 i = put_bytes(&mut line, i, b"\r\n");
                 serial_print(&line[..i]);
 
+                if let Some(slot) = list.get_mut(tuple.count as usize) {
+                    *slot = PciDev {
+                        bus,
+                        dev,
+                        func,
+                        vendor,
+                        device,
+                        class,
+                        subclass,
+                    };
+                }
                 tuple.push(vendor, device, class, subclass);
                 if tuple.count >= DEVICE_CAP {
                     serial_print(b"  hwinv . (capped at 64 device-functions)\r\n");
@@ -387,6 +424,7 @@ pub unsafe fn pci_scan() -> HwSummary {
                         device_digest,
                         rst_vmd: tuple.rst_vmd,
                         devices: tuple.count,
+                        list,
                     };
                 }
             }
@@ -398,5 +436,6 @@ pub unsafe fn pci_scan() -> HwSummary {
         device_digest,
         rst_vmd: tuple.rst_vmd,
         devices: tuple.count,
+        list,
     }
 }
