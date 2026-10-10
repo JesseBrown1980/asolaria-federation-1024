@@ -1,11 +1,12 @@
-//! Host bridge on COM2 — how the desktop's Claude terminal reaches Claude Opus 5.5.
+//! Host bridge on COM3 — how the desktop's Claude terminal reaches Claude Opus 5.5.
 //!
-//! Parallel mode (ASI OS in QEMU beside Windows): QEMU exposes COM2 as a TCP socket bound to
-//! 127.0.0.1 on the host; the host program `asios-claude-bridge` connects to it and answers each
-//! question through the operator's own Claude Code harness (`claude -p`, already signed in, with
-//! the Asolaria MCPs + FABLE5 hooks). No credential ever enters this kernel or its disk.
+//! Parallel mode (ASI OS in QEMU beside Windows): the host program `asios-claude-bridge`
+//! launches the VM itself and owns COM3 through the VM process's stdio (no socket, nothing any
+//! other process can connect to). It answers each question through the operator's own Claude
+//! Code harness (`claude -p`, already signed in, with the Asolaria MCPs + FABLE5 hooks).
+//! No credential ever enters this kernel or its disk.
 //!
-//! Bare metal: there is no host behind COM2, and laptops usually have no COM2 decode at all, so
+//! Bare metal: there is no host behind COM3, and laptops usually have no COM3 decode at all, so
 //! the port is never touched unless CPUID reports a hypervisor; the window says why instead.
 //!
 //! Wire format: ASCII lines, `TAG|payload\n`, the same row shape as the backend `.hbp` journal.
@@ -15,14 +16,17 @@
 
 use crate::{inb, outb};
 
-const COM2: u16 = 0x2F8;
+/// COM3 (0x3E8): OVMF enumerates only COM1/COM2 (0x3F8/0x2F8) and attaches its own terminal
+/// to them, which stole the host's bytes as keystrokes (MEASURED 2026-10-10). The firmware never
+/// sees a UART at 0x3E8, so the kernel owns it alone and no boot text leaks into the channel.
+const COM3: u16 = 0x3E8;
 const LINE_MAX: usize = 512;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum State {
-    /// Bare metal (no hypervisor): COM2 not probed.
+    /// Bare metal (no hypervisor): COM3 not probed.
     Metal,
-    /// Hypervisor present but no UART answers at COM2.
+    /// Hypervisor present but no UART answers at COM3.
     NoPort,
     /// Port present, no HELLO from the host bridge yet.
     Waiting,
@@ -34,7 +38,7 @@ impl State {
     pub(crate) fn text(self) -> &'static [u8] {
         match self {
             State::Metal => b"bare metal: run ASI OS in parallel mode for the Claude bridge",
-            State::NoPort => b"no COM2 in this VM: start it with asios-desk.sh",
+            State::NoPort => b"no COM3 in this VM: start ASI OS with START-ASOLARIA-ASI-OS",
             State::Waiting => b"waiting for the host bridge (asios-claude-bridge)",
             State::Connected => b"bridge connected",
         }
@@ -85,20 +89,20 @@ impl Bridge {
             return b;
         }
         // Scratch-register probe: a 16550 keeps what is written to offset 7.
-        outb(COM2 + 7, 0x5A);
-        if inb(COM2 + 7) != 0x5A {
+        outb(COM3 + 7, 0x5A);
+        if inb(COM3 + 7) != 0x5A {
             b.state = State::NoPort;
             return b;
         }
-        outb(COM2 + 1, 0x00); // no interrupts
-        outb(COM2 + 3, 0x80); // DLAB
-        outb(COM2, 0x01); // 115200 baud
-        outb(COM2 + 1, 0x00);
-        outb(COM2 + 3, 0x03); // 8N1
-        outb(COM2 + 2, 0xC7); // FIFO on, cleared
-        outb(COM2 + 4, 0x03); // DTR + RTS
+        outb(COM3 + 1, 0x00); // no interrupts
+        outb(COM3 + 3, 0x80); // DLAB
+        outb(COM3, 0x01); // 115200 baud
+        outb(COM3 + 1, 0x00);
+        outb(COM3 + 3, 0x03); // 8N1
+        outb(COM3 + 2, 0xC7); // FIFO on, cleared
+        outb(COM3 + 4, 0x03); // DTR + RTS
         b.state = State::Waiting;
-        b.send(b"PING|");
+        let _ = b.send(b"PING|");
         b
     }
 
@@ -106,31 +110,45 @@ impl Bridge {
         matches!(self.state, State::Waiting | State::Connected)
     }
 
-    /// Write one line (`\n` appended). Bounded wait per byte; drops on a stuck port.
-    pub(crate) unsafe fn send(&mut self, s: &[u8]) {
+    /// Write one line (`\n` appended). Bounded wait per byte. Returns false if the port stuck;
+    /// then a best-effort `\n` ends the partial line so the host drops it as a fragment rather
+    /// than joining it onto the next line (opus55 F7).
+    pub(crate) unsafe fn send(&mut self, s: &[u8]) -> bool {
         if !self.live() {
-            return;
+            return false;
         }
         for &c in s.iter().chain(b"\n".iter()) {
-            let mut spins = 0u32;
-            while inb(COM2 + 5) & 0x20 == 0 {
-                spins += 1;
-                if spins > 100_000 {
-                    return;
+            if !Self::tx_ready() {
+                if Self::tx_ready() {
+                    outb(COM3, b'\n');
                 }
+                return false;
             }
-            outb(COM2, c);
+            outb(COM3, c);
         }
+        true
+    }
+
+    unsafe fn tx_ready() -> bool {
+        for _ in 0..100_000 {
+            if inb(COM3 + 5) & 0x20 != 0 {
+                return true;
+            }
+        }
+        false
     }
 
     /// Send a question typed in the Claude window.
-    pub(crate) unsafe fn ask(&mut self, q: &[u8]) {
+    pub(crate) unsafe fn ask(&mut self, q: &[u8]) -> bool {
         let mut row = [0u8; 8 + 128];
         row[..4].copy_from_slice(b"ASK|");
         let n = q.len().min(128);
         row[4..4 + n].copy_from_slice(&q[..n]);
-        self.send(&row[..4 + n]);
-        self.asked = self.asked.wrapping_add(1);
+        let ok = self.send(&row[..4 + n]);
+        if ok {
+            self.asked = self.asked.wrapping_add(1);
+        }
+        ok
     }
 
     /// Drain received bytes; returns the next complete line, if any (bounded work per call).
@@ -140,10 +158,10 @@ impl Bridge {
         }
         self.ready = false;
         for _ in 0..1024 {
-            if inb(COM2 + 5) & 0x01 == 0 {
+            if inb(COM3 + 5) & 0x01 == 0 {
                 break;
             }
-            let c = inb(COM2);
+            let c = inb(COM3);
             if c == b'\n' {
                 self.done[..self.n].copy_from_slice(&self.line[..self.n]);
                 self.dn = self.n;

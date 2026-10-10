@@ -1,58 +1,86 @@
-//! asios-claude-bridge — connects the ASI OS desktop's Claude terminal (COM2 of the parallel
-//! QEMU VM, exposed by QEMU on 127.0.0.1) to the operator's own Claude Code harness.
+//! asios-claude-bridge — the host side of the ASI OS desktop's Claude terminal.
 //!
-//! Each `ASK|<text>` line from the VM runs `claude -p <text> --model <model>` in the operator's
-//! signed-in harness (Asolaria MCPs, FABLE5 hooks, CLAUDE.md), continuing one session per bridge
-//! run, and streams the answer back as `OUT|<line>` rows, then `END|rc=..|ms=..`.
-//! Credentials never leave the harness: the VM only ever sees answer text.
+//! The bridge OWNS the channel: it launches the parallel ASI OS VM itself and speaks to the
+//! kernel's COM2 over that child's stdin/stdout (QEMU `-chardev stdio`). There is no socket and
+//! no listener, so no other process on the machine can impersonate the VM or the host (opus55 R1
+//! F1 on 3bf5c94). The only way to drive it is typing in the ASI OS Claude window.
 //!
-//! Always-on: reconnects every 2 s while the VM is down; one question at a time.
+//! Each `ASK|<text>` line runs `claude -p --model <model>` in the operator's signed-in Claude
+//! Code harness (CLAUDE.md, hooks, Asolaria MCPs) with the question on STDIN (never argv, so it
+//! can never be parsed as an option — F2), continuing one session per bridge run, and streams
+//! the answer back as `OUT|<line>` rows, then `END|rc=..|ms=..`. Credentials stay in the harness.
+//!
 //! Journal: one `.hbp` row per event with sha256 of question/answer (`json=0`), hot path first.
-//! The bridge listens on nothing; it is a client of the VM's loopback-only serial socket.
-//! std only, integer only. E=0: it runs only when the operator starts it.
+//! std only, integer only. E=0: it runs only when the operator starts it; it exits with the VM.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpStream;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const DEFAULT_ADDR: &str = "127.0.0.1:4797";
 const DEFAULT_MODEL: &str = "claude-opus-5-5";
 const DEFAULT_JOURNAL: &str =
     "D:/PID-Registration-Office/offices/FABLE5-8467a937cba309f7/asios-parallel/claude-bridge.hbp";
+/// The VM launcher: QEMU in WSL with COM2 on stdio (see asios-desk.sh `run`).
+const DEFAULT_VM: [&str; 6] = [
+    "wsl.exe",
+    "-e",
+    "sh",
+    "/mnt/d/.asolaria-office/boot/asios-desk.sh",
+    "run",
+    "gtk",
+];
 const ANSWER_LIMIT: Duration = Duration::from_secs(900);
+/// After the child has exited (or been killed), wait this long for its stdout to close; a
+/// grandchild holding the pipe open must not wedge the bridge (F3b).
+const DRAIN_GRACE: Duration = Duration::from_secs(3);
 const CHUNK: usize = 400;
+/// Longest line accepted from the VM (the kernel never sends more than ~140 bytes).
+const LINE_LIMIT: u64 = 4096;
+
+static UUID_SEQ: AtomicU64 = AtomicU64::new(0);
 
 struct Cfg {
-    addr: String,
     model: String,
     claude: String,
     journal: String,
     cwd: String,
+    vm: Vec<String>,
 }
 
 fn cfg() -> Cfg {
     let mut c = Cfg {
-        addr: DEFAULT_ADDR.into(),
         model: DEFAULT_MODEL.into(),
         claude: "claude".into(),
         journal: DEFAULT_JOURNAL.into(),
         cwd: std::env::var("USERPROFILE").unwrap_or_else(|_| ".".into()),
+        vm: DEFAULT_VM.iter().map(|s| s.to_string()).collect(),
     };
     let a: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
-    while i + 1 < a.len() {
-        let v = a[i + 1].clone();
+    while i < a.len() {
         match a[i].as_str() {
-            "--addr" => c.addr = v,
-            "--model" => c.model = v,
-            "--claude" => c.claude = v,
-            "--journal" => c.journal = v,
-            "--cwd" => c.cwd = v,
+            // Everything after --vm is the VM command line (e.g. `--vm wsl.exe -e sh x.sh run none`).
+            "--vm" => {
+                c.vm = a[i + 1..].to_vec();
+                break;
+            }
+            k if i + 1 < a.len() => {
+                let v = a[i + 1].clone();
+                match k {
+                    "--model" => c.model = v,
+                    "--claude" => c.claude = v,
+                    "--journal" => c.journal = v,
+                    "--cwd" => c.cwd = v,
+                    _ => {}
+                }
+                i += 2;
+                continue;
+            }
             _ => {}
         }
-        i += 2;
+        i += 1;
     }
     c
 }
@@ -164,7 +192,12 @@ fn journal(path: &str, row: &str) {
 
 /// A v4-shaped UUID from time + pid through a sha256 mix (no RNG crate needed).
 fn session_uuid() -> String {
-    let seed = format!("{}|{}|asios-claude-bridge", unix_ms(), std::process::id());
+    let n = UUID_SEQ.fetch_add(1, Ordering::Relaxed);
+    let seed = format!(
+        "{}|{}|{n}|asios-claude-bridge",
+        unix_ms(),
+        std::process::id()
+    );
     let mut b = sha256(seed.as_bytes());
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
@@ -205,19 +238,19 @@ fn ascii(s: &str) -> String {
     o
 }
 
-fn send(s: &mut TcpStream, tag: &str, body: &str) -> std::io::Result<()> {
+fn send<W: Write>(s: &mut W, tag: &str, body: &str) -> std::io::Result<()> {
     let body = ascii(body);
     if body.is_empty() {
-        return s.write_all(format!("{tag}|\n").as_bytes());
+        s.write_all(format!("{tag}|\n").as_bytes())?;
+        return s.flush();
     }
-    let bytes = body.as_bytes();
-    for chunk in bytes.chunks(CHUNK) {
+    for chunk in body.as_bytes().chunks(CHUNK) {
         s.write_all(tag.as_bytes())?;
         s.write_all(b"|")?;
         s.write_all(chunk)?;
         s.write_all(b"\n")?;
     }
-    Ok(())
+    s.flush()
 }
 
 struct Session {
@@ -225,11 +258,16 @@ struct Session {
     started: bool,
 }
 
-fn answer(c: &Cfg, sess: &mut Session, q: &str, out: &mut TcpStream) -> std::io::Result<()> {
+/// Kill + reap; never leave a child running behind a failed send (F3c).
+fn reap(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn answer<W: Write>(c: &Cfg, sess: &mut Session, q: &str, out: &mut W) -> std::io::Result<()> {
     let t0 = Instant::now();
     let mut cmd = Command::new(&c.claude);
     cmd.arg("-p")
-        .arg(q)
         .arg("--model")
         .arg(&c.model)
         .arg("--output-format")
@@ -240,7 +278,7 @@ fn answer(c: &Cfg, sess: &mut Session, q: &str, out: &mut TcpStream) -> std::io:
         cmd.arg("--session-id").arg(&sess.id);
     }
     cmd.current_dir(&c.cwd)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = match cmd.spawn() {
@@ -256,11 +294,14 @@ fn answer(c: &Cfg, sess: &mut Session, q: &str, out: &mut TcpStream) -> std::io:
             return Ok(());
         }
     };
-    let stdout = child.stdout.take();
-    let mut stderr = child.stderr.take();
+    // The question goes on stdin, then stdin closes (F2: never an argv token).
+    if let Some(mut si) = child.stdin.take() {
+        let _ = si.write_all(q.as_bytes());
+    }
+    // stdout and stderr are both drained on their own threads (F3a: no pipe-full deadlock).
     let (tx, rx) = mpsc::channel::<String>();
-    let reader = std::thread::spawn(move || {
-        if let Some(so) = stdout {
+    if let Some(so) = child.stdout.take() {
+        std::thread::spawn(move || {
             for line in BufReader::new(so).lines() {
                 match line {
                     Ok(l) => {
@@ -271,36 +312,63 @@ fn answer(c: &Cfg, sess: &mut Session, q: &str, out: &mut TcpStream) -> std::io:
                     Err(_) => break,
                 }
             }
-        }
-    });
+        });
+    } else {
+        drop(tx);
+    }
+    let (etx, erx) = mpsc::channel::<String>();
+    if let Some(mut se) = child.stderr.take() {
+        std::thread::spawn(move || {
+            let mut e = String::new();
+            let _ = se.read_to_string(&mut e);
+            let _ = etx.send(e);
+        });
+    }
     let mut all = String::new();
     let mut timed_out = false;
+    let mut exited_at: Option<Instant> = None;
+    let mut rc: Option<i32> = None;
     loop {
         match rx.recv_timeout(Duration::from_millis(250)) {
             Ok(line) => {
-                send(out, "OUT", &line)?;
+                if let Err(e) = send(out, "OUT", &line) {
+                    reap(&mut child);
+                    return Err(e);
+                }
                 all.push_str(&line);
                 all.push('\n');
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                if t0.elapsed() > ANSWER_LIMIT {
+                if !timed_out && t0.elapsed() > ANSWER_LIMIT {
                     let _ = child.kill();
                     timed_out = true;
+                }
+                if exited_at.is_none() {
+                    if let Ok(Some(st)) = child.try_wait() {
+                        rc = Some(st.code().unwrap_or(-1));
+                        exited_at = Some(Instant::now());
+                    }
+                }
+                // F3b: a grandchild may hold stdout open forever; stop waiting for EOF.
+                if exited_at.is_some_and(|t| t.elapsed() > DRAIN_GRACE) {
+                    break;
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
-    let _ = reader.join();
-    let status = child.wait()?;
-    let rc = status.code().unwrap_or(-1);
-    let mut err = String::new();
-    if let Some(se) = stderr.as_mut() {
-        let _ = se.read_to_string(&mut err);
-    }
+    let rc = match rc {
+        Some(r) => r,
+        None => child.wait().map(|s| s.code().unwrap_or(-1)).unwrap_or(-1),
+    };
+    let err = erx.recv_timeout(Duration::from_secs(1)).unwrap_or_default();
     if rc != 0 {
         for l in err.lines().take(6) {
             send(out, "OUT", &format!("stderr: {l}"))?;
+        }
+        // F4: a failed FIRST call may have created the session; start a fresh id next time.
+        if !sess.started {
+            sess.id = session_uuid();
         }
     } else {
         sess.started = true;
@@ -333,32 +401,40 @@ fn hello(c: &Cfg, sess: &Session) -> String {
     )
 }
 
-fn serve(c: &Cfg, sess: &mut Session, s: TcpStream) -> std::io::Result<()> {
-    let mut out = s.try_clone()?;
-    send(&mut out, "HELLO", &hello(c, sess))?;
-    let mut rd = BufReader::new(s);
+/// Serve the kernel over the VM's COM2 (child stdout = from kernel, child stdin = to kernel).
+fn serve<R: BufRead, W: Write>(
+    c: &Cfg,
+    sess: &mut Session,
+    mut rd: R,
+    out: &mut W,
+) -> std::io::Result<()> {
+    send(out, "HELLO", &hello(c, sess))?;
     let mut raw = Vec::new();
     loop {
         raw.clear();
-        if rd.read_until(b'\n', &mut raw)? == 0 {
-            return Ok(()); // VM closed the socket
+        // F9: bounded line read.
+        if (&mut rd).take(LINE_LIMIT).read_until(b'\n', &mut raw)? == 0 {
+            return Ok(()); // VM exited
+        }
+        if raw.last() != Some(&b'\n') {
+            continue; // over-long or truncated fragment: drop it
         }
         let line = String::from_utf8_lossy(&raw);
         let line = line.trim_end_matches(['\r', '\n']);
         let (tag, body) = line.split_once('|').unwrap_or((line, ""));
         match tag {
-            "PING" => send(&mut out, "HELLO", &hello(c, sess))?,
+            "PING" => send(out, "HELLO", &hello(c, sess))?,
             "ASK" => {
                 let q = body.trim();
                 if q.is_empty() {
-                    send(&mut out, "END", "rc=empty_question")?;
+                    send(out, "END", "rc=empty_question")?;
                     continue;
                 }
                 journal(
                     &c.journal,
                     &format!("op=ask|session={}|q_sha16={}", sess.id, sha16(q.as_bytes())),
                 );
-                answer(c, sess, q, &mut out)?;
+                answer(c, sess, q, out)?;
             }
             _ => {}
         }
@@ -371,41 +447,52 @@ fn main() {
         id: session_uuid(),
         started: false,
     };
+    let Some((prog, args)) = c.vm.split_first() else {
+        eprintln!("asios-claude-bridge: empty --vm command");
+        std::process::exit(2);
+    };
     journal(
         &c.journal,
         &format!(
-            "op=start|addr={}|model={}|session={}",
-            c.addr, c.model, sess.id
+            "op=start|model={}|session={}|vm={}|channel=vm_stdio",
+            c.model,
+            sess.id,
+            ascii(&c.vm.join(" ")).replace('|', "/")
         ),
     );
-    let mut waiting_logged = false;
-    loop {
-        match TcpStream::connect(&c.addr) {
-            Ok(s) => {
-                waiting_logged = false;
-                let _ = s.set_nodelay(true);
-                journal(&c.journal, &format!("op=connected|addr={}", c.addr));
-                let r = serve(&c, &mut sess, s);
-                journal(
-                    &c.journal,
-                    &format!(
-                        "op=disconnected|why={}",
-                        match r {
-                            Ok(()) => "vm_closed".to_string(),
-                            Err(e) => ascii(&e.to_string()).replace('|', "/"),
-                        }
-                    ),
-                );
-            }
-            Err(_) => {
-                if !waiting_logged {
-                    journal(&c.journal, &format!("op=waiting_for_vm|addr={}", c.addr));
-                    waiting_logged = true;
-                }
-            }
+    let mut vm = match Command::new(prog)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+    {
+        Ok(v) => v,
+        Err(e) => {
+            journal(
+                &c.journal,
+                &format!("op=vm_spawn_failed|why={}", ascii(&e.to_string())),
+            );
+            std::process::exit(1);
         }
-        std::thread::sleep(Duration::from_secs(2));
-    }
+    };
+    let (Some(mut to_vm), Some(from_vm)) = (vm.stdin.take(), vm.stdout.take()) else {
+        reap(&mut vm);
+        std::process::exit(1);
+    };
+    let r = serve(&c, &mut sess, BufReader::new(from_vm), &mut to_vm);
+    drop(to_vm);
+    let code = vm.wait().map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
+    journal(
+        &c.journal,
+        &format!(
+            "op=vm_exited|rc={code}|why={}",
+            match r {
+                Ok(()) => "vm_closed".to_string(),
+                Err(e) => ascii(&e.to_string()).replace('|', "/"),
+            }
+        ),
+    );
 }
 
 #[cfg(test)]
@@ -429,6 +516,50 @@ mod tests {
             )),
             "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
         );
+    }
+
+    #[test]
+    fn serve_answers_ping_and_rejects_empty_and_oversize() {
+        let c = Cfg {
+            model: "m".into(),
+            claude: "definitely-not-a-real-binary-xyz".into(),
+            journal: std::env::temp_dir()
+                .join("asios-bridge-test.hbp")
+                .to_string_lossy()
+                .into_owned(),
+            cwd: ".".into(),
+            vm: vec![],
+        };
+        let mut sess = Session {
+            id: session_uuid(),
+            started: false,
+        };
+        let mut input = b"PING|
+ASK|   
+"
+        .to_vec();
+        input.extend(std::iter::repeat(b'x').take(5000)); // oversize, no newline
+        input.extend_from_slice(
+            b"
+ASK|-hi --flag
+",
+        );
+        let mut out = Vec::new();
+        serve(&c, &mut sess, &input[..], &mut out).unwrap();
+        let o = String::from_utf8(out).unwrap();
+        let lines: Vec<&str> = o.lines().collect();
+        assert!(lines[0].starts_with("HELLO|m via"));
+        assert!(lines[1].starts_with("HELLO|"));
+        assert_eq!(lines[2], "END|rc=empty_question");
+        // The '-'-leading question reached answer() (spawn fails on the fake binary, cleanly).
+        assert!(lines[3].starts_with("OUT|bridge: cannot start"));
+        assert_eq!(lines[4], "END|rc=spawn_failed");
+        assert_eq!(lines.len(), 5);
+    }
+
+    #[test]
+    fn uuids_differ_within_one_millisecond() {
+        assert_ne!(session_uuid(), session_uuid());
     }
 
     #[test]

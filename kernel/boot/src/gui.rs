@@ -101,7 +101,7 @@ struct Desk<'a, 'b> {
     last_click: (u64, usize),
     hover: Hit,
     term: Term,
-    /// The Claude terminal (Opus 5.5 through the host bridge on COM2).
+    /// The Claude terminal (Opus 5.5 through the host bridge on COM3).
     cterm: Term,
     bridge: Bridge,
     claude_busy: bool,
@@ -243,7 +243,7 @@ pub(crate) unsafe fn run(c: &mut Ctx) {
         hover: Hit::None,
         term: Term::new(cells, tones, COLS),
         cterm: Term::new(ccells, ctones, COLS),
-        // SAFETY: COM2 port I/O, only under a hypervisor (see bridge.rs).
+        // SAFETY: COM3 port I/O, only under a hypervisor (see bridge.rs).
         bridge: unsafe { Bridge::open() },
         claude_busy: false,
         last_cmd: [0; 72],
@@ -477,7 +477,7 @@ impl Desk<'_, '_> {
         t.tone(Tone::Accent);
         t.put(b"CLAUDE  .  Opus 5.5  .  seat ACER-CLAUDE-FABLE5\n");
         t.tone(Tone::Normal);
-        t.put(b"Type a question and press Enter. It goes over COM2 to the host bridge, which\n");
+        t.put(b"Type a question and press Enter. It goes over COM3 to the host bridge, which\n");
         t.put(b"answers through the operator's own Claude Code harness (signed in, Asolaria\n");
         t.put(b"MCPs, FABLE5 office). No credential lives in this kernel.\n\n");
         t.tone(Tone::Warn);
@@ -518,9 +518,15 @@ impl Desk<'_, '_> {
             self.cterm.put(b"  still answering the last question\n");
             self.cterm.tone(Tone::Normal);
         } else {
-            // SAFETY: COM2 port I/O (bridge is live only under a hypervisor with a UART).
-            unsafe { self.bridge.ask(&q[..n]) };
-            self.claude_busy = true;
+            // SAFETY: COM3 port I/O (bridge is live only under a hypervisor with a UART).
+            if unsafe { self.bridge.ask(&q[..n]) } {
+                self.claude_busy = true;
+            } else {
+                self.cterm.tone(Tone::Error);
+                self.cterm
+                    .put(b"  COM3 did not take the question (port stuck)\n");
+                self.cterm.tone(Tone::Normal);
+            }
         }
         let r = self.wins[App::Claude.idx()].r;
         self.mark(Self::win_area(r));
@@ -530,13 +536,15 @@ impl Desk<'_, '_> {
     fn claude_pump(&mut self) {
         let mut changed = false;
         for _ in 0..32 {
-            // SAFETY: COM2 port I/O (no-op unless the bridge is live).
+            // SAFETY: COM3 port I/O (no-op unless the bridge is live).
             let Some(m) = (unsafe { self.bridge.poll() }) else {
                 break;
             };
             changed = true;
             match m {
                 Msg::Hello(who) => {
+                    // A (re)connected bridge has nothing in flight (opus55 F5).
+                    self.claude_busy = false;
                     self.cterm.tone(Tone::Accent);
                     self.cterm.put(b"  connected: ");
                     self.cterm.put(who);
@@ -1501,12 +1509,10 @@ impl Desk<'_, '_> {
                 self.cv
                     .round(r, 7, mix(rgb(0x0b, 0x11, 0x20), apps::CYAN, 60), 256);
             }
-            let c = if i < NAPP {
-                APPS[i].color()
-            } else if i == 7 {
-                apps::TEXT
-            } else {
-                apps::RED
+            let c = match i.cmp(&NAPP) {
+                core::cmp::Ordering::Less => APPS[i].color(),
+                core::cmp::Ordering::Equal => apps::TEXT,
+                core::cmp::Ordering::Greater => apps::RED,
             };
             self.cv.disc(r.x + 16, r.y + 14, 5, c);
             self.cv.text(r.x + 32, r.y + 6, label, apps::TEXT, 1);
