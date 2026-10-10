@@ -23,6 +23,7 @@
 //!   "PIDA" → respond with PID anchor
 //!   other  → respond with "UNKN" + echo bytes[0..4]
 
+use asolaria_kernel_core::envelope::ENVELOPE_SLOT_BYTES;
 use asolaria_kernel_core::syscall::{
     sys_cosign_append, sys_envelope_recv, sys_envelope_send, sys_exec, sys_exit, sys_hookwall_post,
     sys_hookwall_pre, sys_pid_current, HookwallVerdict, SyscallErr,
@@ -220,7 +221,9 @@ const ENVELOPE_MIN: usize = 32;
 /// Empty the bus so a caller starts clean (also the recovery path if a reply was left in the
 /// single bus slot).
 pub fn drain() {
-    let mut buf = [0u8; INIT_ENVELOPE_MAX];
+    // Slot-sized: a smaller buffer cannot take an oversized envelope, which would stay in the
+    // slot and wedge the bus for good.
+    let mut buf = [0u8; ENVELOPE_SLOT_BYTES];
     for _ in 0..4 {
         if sys_envelope_recv(&mut buf, 0).is_err() {
             break;
@@ -237,15 +240,22 @@ pub fn exchange(ty: &[u8; 4], seq: &mut u64, reply: &mut [u8]) -> Result<usize, 
     req[0..4].copy_from_slice(ty);
     req[4..12].copy_from_slice(&seq.to_le_bytes());
     *seq = seq.wrapping_add(1);
-    sys_envelope_send(&req, ROUTE_HINT_LOCAL).map_err(|_| &b"send-rejected"[..])?;
-    let mut buf = [0u8; INIT_ENVELOPE_MAX];
+    if sys_envelope_send(&req, ROUTE_HINT_LOCAL).is_err() {
+        // Something is occupying the slot; clear it so the next exchange can go through.
+        drain();
+        return Err(b"send-rejected");
+    }
+    let mut buf = [0u8; ENVELOPE_SLOT_BYTES];
     let n = sys_envelope_recv(&mut buf, 0).map_err(|_| &b"request-lost"[..])?;
     if n < 4 {
         return Err(b"malformed");
     }
     let prefix = [buf[0], buf[1], buf[2], buf[3]];
+    // init stamps its reply with the next sequence number.
+    let want = *seq;
     dispatch_envelope(&prefix, &buf[..n], seq);
     match sys_envelope_recv(reply, 0) {
+        Ok(n) if n >= 12 && reply[4..12] != want.to_le_bytes() => Err(b"stale-reply"),
         Ok(n) => Ok(n),
         Err(_) => {
             // A reply larger than `reply` stays in the single bus slot and would make every

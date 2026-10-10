@@ -68,6 +68,11 @@ static mut HEAP: [u8; HEAP_SIZE] = [0u8; HEAP_SIZE];
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
+    // The console disables the firmware watchdog, so a bare halt would hang until power-off:
+    // cold-reset through UEFI first; halt only if the firmware ignores it.
+    unsafe {
+        console::panic_reset();
+    }
     loop {
         unsafe {
             core::arch::asm!("hlt", options(nomem, nostack));
@@ -344,7 +349,9 @@ pub extern "efiapi" fn efi_main(
                     let fmt = (*info).pixel_format;
                     let fb = (*mode).framebuffer_base as *mut u32;
                     // fmt 3 = PixelBltOnly: no linear framebuffer, never write it directly.
-                    if !fb.is_null() && fmt < 3 && w >= 320 && h >= 200 {
+                    // fmt 2 = PixelBitMask: channel layout comes from masks `pack` does not
+                    // read, so skip the splash rather than draw wrong colours.
+                    if !fb.is_null() && fmt < 2 && w >= 320 && h >= 200 {
                         let bg = pack(fmt, 0x05, 0x07, 0x0D);
                         let cyan = pack(fmt, 0x43, 0xE8, 0xD8);
                         let amber = pack(fmt, 0xFF, 0xB4, 0x54);

@@ -19,6 +19,8 @@
 
 use crate::init;
 use crate::{EfiSystemTable, EfiTableHeader};
+use asolaria_kernel_core::envelope::ENVELOPE_SLOT_BYTES;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 /// UEFI status EFI_UNSUPPORTED (high bit | 3): firmware has no watchdog to disable.
 const EFI_UNSUPPORTED: usize = (1usize << 63) | 3;
@@ -95,6 +97,19 @@ fn watchdog_text(wd: Watchdog) -> &'static [u8] {
     }
 }
 
+/// Runtime services, published for the panic handler: with the watchdog disabled a panic
+/// would otherwise hang until power-off, so the handler cold-resets instead.
+static PANIC_RT: AtomicUsize = AtomicUsize::new(0);
+
+/// Cold-reset via UEFI ResetSystem if the console has published runtime services. Returns
+/// only if the firmware ignores the reset (or the console never started).
+pub(crate) unsafe fn panic_reset() {
+    let rt = PANIC_RT.load(Ordering::Relaxed) as *mut RuntimeSvc;
+    if !rt.is_null() {
+        let _ = ((*rt).reset_system)(0, 0, 0, core::ptr::null());
+    }
+}
+
 struct Con {
     out: *mut TextOut,
     inp: *mut SimpleTextInput,
@@ -125,6 +140,18 @@ impl Con {
         }
         buf[i] = 0;
         ((*self.out).output_string)(self.out, buf.as_ptr());
+    }
+
+    /// Print untrusted bytes: anything outside printable ASCII becomes '.', so a NUL cannot
+    /// cut the line short and control bytes never reach the screen.
+    unsafe fn text(&self, s: &[u8]) {
+        let mut b = [0u8; 64];
+        for chunk in s.chunks(b.len()) {
+            for (d, &x) in b.iter_mut().zip(chunk) {
+                *d = if (0x20..0x7F).contains(&x) { x } else { b'.' };
+            }
+            self.print(&b[..chunk.len()]);
+        }
     }
 
     unsafe fn hex(&self, bytes: &[u8]) {
@@ -206,6 +233,9 @@ unsafe fn banner(c: &Con, f: &BootFacts, wd: Watchdog) {
     c.print(&f.utc[..f.utc_len]);
     c.print(b"\n  pci         ");
     c.dec(f.pci_devices as u64);
+    if f.pci_devices >= crate::hwinv::DEVICE_CAP {
+        c.print(b"+ (capped)");
+    }
     c.print(b" device-functions   storage-driver(rst/vmd) ");
     c.print(if f.rst_vmd { b"MATCHED" } else { b"n/a    " });
     c.print(b"\n  watchdog    ");
@@ -229,12 +259,12 @@ unsafe fn help(c: &Con) {
 
 /// Send one envelope type through the real init dispatch and print the reply.
 unsafe fn envelope(c: &Con, ty: &[u8; 4], seq: &mut u64) {
-    // As large as init's biggest envelope, so a reply can never be left stuck in the bus slot.
-    let mut reply = [0u8; 512];
+    // As large as the bus slot itself, so a reply can never be left stuck in it.
+    let mut reply = [0u8; ENVELOPE_SLOT_BYTES];
     match init::exchange(ty, seq, &mut reply) {
         Ok(n) => {
             c.color(CYAN);
-            c.print(&reply[..4]);
+            c.text(&reply[..4]);
             c.color(GREY);
             // payload starts after the 12-byte header; trim zero padding
             let mut end = n;
@@ -243,7 +273,7 @@ unsafe fn envelope(c: &Con, ty: &[u8; 4], seq: &mut u64) {
             }
             if end > 12 {
                 c.print(b"  ");
-                c.print(&reply[12..end]);
+                c.text(&reply[12..end]);
             }
             c.print(b"\n");
         }
@@ -265,6 +295,7 @@ pub(crate) unsafe fn run(st: *mut EfiSystemTable, facts: &BootFacts) -> ! {
         bs: (*st).boot_services as *mut BootSvc,
         rt: (*st).runtime_services as *mut RuntimeSvc,
     };
+    PANIC_RT.store(c.rt as usize, Ordering::Relaxed);
     // 1. The watchdog: without this the firmware resets the machine 5 minutes after launch.
     //    The firmware's status is reported as returned, not assumed.
     let wd = if c.bs.is_null() {
@@ -291,6 +322,7 @@ pub(crate) unsafe fn run(st: *mut EfiSystemTable, facts: &BootFacts) -> ! {
     init::drain();
     let mut line = [0u8; 64];
     let mut len = 0usize;
+    let mut last_cr = false;
     c.color(AMBER);
     c.print(b"asolaria> ");
     c.color(GREY);
@@ -300,7 +332,13 @@ pub(crate) unsafe fn run(st: *mut EfiSystemTable, facts: &BootFacts) -> ! {
             continue;
         };
         let ch = k.unicode_char;
-        if ch == 0x0D {
+        // Enter is CR on a keyboard; some serial/remote terminals send LF or CR LF.
+        let lf_after_cr = ch == 0x0A && last_cr;
+        last_cr = ch == 0x0D;
+        if lf_after_cr {
+            continue;
+        }
+        if ch == 0x0D || ch == 0x0A {
             c.print(b"\n");
             let cmd = &line[..len];
             match cmd {
@@ -327,7 +365,7 @@ pub(crate) unsafe fn run(st: *mut EfiSystemTable, facts: &BootFacts) -> ! {
                 _ => {
                     c.color(RED);
                     c.print(b"  unknown command: ");
-                    c.print(cmd);
+                    c.text(cmd);
                     c.print(b"   (type 'help')\n");
                     c.color(GREY);
                 }
