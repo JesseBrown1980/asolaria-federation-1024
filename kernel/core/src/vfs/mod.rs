@@ -324,30 +324,7 @@ pub fn vfs_write(fd: u64, buf: &[u8]) -> Result<usize, VfsErr> {
 mod tests {
     use super::*;
 
-    /// The FD table is process-global, so tests that reset and use it must not interleave when
-    /// the harness runs tests in parallel (the 1.81 verify job does; ci.yml uses
-    /// --test-threads=1). A no_std spin lock held for the whole test; released on drop, also on
-    /// panic-unwind, so one failing test cannot wedge the rest.
-    static VFS_TEST_LOCK: core::sync::atomic::AtomicBool =
-        core::sync::atomic::AtomicBool::new(false);
-
-    struct SerialGuard;
-
-    impl Drop for SerialGuard {
-        fn drop(&mut self) {
-            VFS_TEST_LOCK.store(false, Ordering::Release);
-        }
-    }
-
-    fn serial() -> SerialGuard {
-        while VFS_TEST_LOCK
-            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        {
-            core::hint::spin_loop();
-        }
-        SerialGuard
-    }
+    use crate::test_sync::serial;
 
     // ===== v0.1 tests (preserved verbatim) =====
 

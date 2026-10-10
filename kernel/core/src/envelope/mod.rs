@@ -257,11 +257,13 @@ mod tests {
 
     #[test]
     fn capacity_is_16384() {
+        let _g = crate::test_sync::serial();
         assert_eq!(ENVELOPE_QUEUE_CAPACITY, 16384);
     }
 
     #[test]
     fn gc_threshold_is_75pct() {
+        let _g = crate::test_sync::serial();
         assert_eq!(ENVELOPE_GC_TRIGGER_PCT, 75);
         // 75% of 16384 = 12288
         assert_eq!(
@@ -272,6 +274,7 @@ mod tests {
 
     #[test]
     fn route_hints_have_canonical_values() {
+        let _g = crate::test_sync::serial();
         assert_eq!(RouteHint::LOCAL.0, 0);
         assert_eq!(RouteHint::QUAD_BROADCAST.0, 1);
         assert_eq!(RouteHint::TRIAD_BROADCAST.0, 2);
@@ -279,6 +282,7 @@ mod tests {
 
     #[test]
     fn stub_enqueue_returns_unimplemented() {
+        let _g = crate::test_sync::serial();
         let sig = [0u8; 64];
         let header = EnvelopeHeader {
             from_pid: 0,
@@ -298,6 +302,7 @@ mod tests {
 
     #[test]
     fn queue_depth_starts_empty() {
+        let _g = crate::test_sync::serial();
         assert_eq!(queue_depth(), 0);
         assert!(!should_trigger_gc());
     }
