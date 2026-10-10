@@ -11,6 +11,7 @@
 //! Integer only: relative counts are scaled by the device's own counts-per-mm, absolute
 //! positions by the device's range onto the screen.
 
+use crate::i2chid::{I2cHid, Report as I2cReport};
 use crate::ps2mouse::{Probe, Ps2};
 use crate::uefi::{Bs, Guid, Handle};
 
@@ -116,7 +117,10 @@ pub(crate) struct Pointers {
     pub connected_usb: usize,
     /// Physical firmware pointer devices (handles minus the splitter's virtual one).
     pub phys: usize,
-    /// The kernel's own PS/2 aux driver, started only when `phys == 0`.
+    /// The kernel's own I2C-HID touchpad driver, tried first when `phys == 0`.
+    i2c: Option<I2cHid>,
+    pub i2c_report: Option<I2cReport>,
+    /// The kernel's own PS/2 aux driver, started only when `phys == 0` and no I2C-HID device.
     ps2: Option<Ps2>,
     pub ps2_probe: Option<Probe>,
     left: bool,
@@ -139,6 +143,8 @@ impl Pointers {
             via_splitter: false,
             connected_usb: 0,
             phys: 0,
+            i2c: None,
+            i2c_report: None,
             ps2: None,
             ps2_probe: None,
             left: false,
@@ -157,7 +163,13 @@ impl Pointers {
             }
         }
         if p.phys == 0 {
-            // Still nothing from firmware: start the kernel's own PS/2 aux-port driver.
+            // Still nothing from firmware: laptop touchpads on the PCH I2C bus (HID over I2C).
+            let (drv, rep) = I2cHid::probe(bs);
+            p.i2c = drv;
+            p.i2c_report = Some(rep);
+        }
+        if p.phys == 0 && p.i2c.is_none() {
+            // Still nothing: start the kernel's own PS/2 aux-port driver.
             let (drv, probe) = Ps2::probe();
             p.ps2 = drv;
             p.ps2_probe = Some(probe);
@@ -215,7 +227,7 @@ impl Pointers {
     /// behind it) counts as nothing; the kernel's PS/2 driver counts as one relative source.
     pub(crate) fn counts(&self) -> (usize, usize) {
         if self.phys == 0 {
-            return (self.ps2.is_some() as usize, 0);
+            return (self.ps2.is_some() as usize + self.i2c.is_some() as usize, 0);
         }
         if self.via_splitter {
             // The splitter merges every physical device; report what stands behind it.
@@ -235,6 +247,10 @@ impl Pointers {
         if let Some(p) = self.ps2.as_mut() {
             p.resume();
         }
+    }
+
+    pub(crate) fn i2c_active(&self) -> bool {
+        self.i2c.is_some()
     }
 
     pub(crate) fn ps2_active(&self) -> bool {
@@ -270,6 +286,20 @@ impl Pointers {
             ev.dz += st.dz;
             l = st.left != 0;
             r = st.right != 0;
+        }
+        if let Some(tp) = self.i2c.as_mut() {
+            if let Some((dx, dy, wh, pl, pr)) = tp.poll() {
+                got = true;
+                // Touchpad mouse-mode counts are fine-grained: 1 px per count, doubled past a
+                // small threshold so a swipe crosses the screen (integer acceleration).
+                self.rem_x = self.rem_x.saturating_add(accel(dx).saturating_mul(16));
+                self.rem_y = self.rem_y.saturating_add(accel(dy).saturating_mul(16));
+                // Same sign convention as the firmware's Simple Pointer (EDK2 passes the HID
+                // wheel value through unchanged).
+                ev.dz += wh;
+                l = pl;
+                r = pr;
+            }
         }
         if let Some(ps2) = self.ps2.as_mut() {
             if let Some((dx, dy, pl, pr)) = ps2.poll() {
@@ -314,6 +344,15 @@ impl Pointers {
         ev.left = l;
         ev.right = r;
         Some(ev)
+    }
+}
+
+/// Integer pointer acceleration: slow motion stays 1:1 for precision, fast motion doubles.
+fn accel(d: i32) -> i32 {
+    if d.saturating_abs() > 6 {
+        d.saturating_mul(2)
+    } else {
+        d
     }
 }
 

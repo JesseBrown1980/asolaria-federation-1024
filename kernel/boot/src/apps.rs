@@ -35,9 +35,10 @@ pub(crate) enum App {
     Power,
     About,
     Help,
+    Claude,
 }
 
-pub(crate) const APPS: [App; 7] = [
+pub(crate) const APPS: [App; 8] = [
     App::Console,
     App::System,
     App::Devices,
@@ -45,6 +46,7 @@ pub(crate) const APPS: [App; 7] = [
     App::Power,
     App::About,
     App::Help,
+    App::Claude,
 ];
 
 impl App {
@@ -57,6 +59,7 @@ impl App {
             App::Power => 4,
             App::About => 5,
             App::Help => 6,
+            App::Claude => 7,
         }
     }
     pub(crate) fn name(self) -> &'static [u8] {
@@ -68,6 +71,7 @@ impl App {
             App::Power => b"Power",
             App::About => b"About",
             App::Help => b"Help",
+            App::Claude => b"Claude",
         }
     }
     pub(crate) fn color(self) -> u32 {
@@ -79,6 +83,7 @@ impl App {
             App::Power => RED,
             App::About => CYAN,
             App::Help => BLUE,
+            App::Claude => AMBER,
         }
     }
     /// Default window size (clamped to the screen by the window manager).
@@ -91,6 +96,7 @@ impl App {
             App::Power => (540, 250),
             App::About => (700, 330),
             App::Help => (740, 440),
+            App::Claude => (780, 460),
         }
     }
 }
@@ -271,6 +277,12 @@ pub(crate) struct View<'a> {
     pub usb_connected: usize,
     /// Which driver feeds the pointer (firmware devices, the kernel's PS/2 driver, or none).
     pub ptr_note: &'static [u8],
+    /// Claude-terminal bridge state line and whether a question is in flight.
+    pub bridge_note: &'static [u8],
+    pub bridge_ok: bool,
+    pub claude_busy: bool,
+    /// What the kernel's I2C-HID touchpad probe saw (None when firmware devices were found).
+    pub i2c: Option<crate::i2chid::Report>,
     pub kbd_pointer: bool,
     pub mem: Option<(u64, u64)>,
     pub tsc_khz: u64,
@@ -425,6 +437,15 @@ pub(crate) fn draw_icon(cv: &mut Canvas, app: App, x: i32, y: i32) {
             cv.disc(x + 24, y + 24, 16, rgb(0xe6, 0xf0, 0xff));
             cv.text(x + 16, y + 9, b"?", rgb(0x1a, 0x40, 0x8a), 2);
         }
+        App::Claude => {
+            // A terminal tile in Claude's amber with a spark: the Opus 5.5 terminal.
+            cv.round_vgrad(r, 10, rgb(0x5a, 0x34, 0x14), rgb(0x24, 0x12, 0x06));
+            cv.line_w(x + 10, y + 16, x + 18, y + 23, 3, AMBER);
+            cv.line_w(x + 18, y + 23, x + 10, y + 30, 3, AMBER);
+            cv.fill(Rect::new(x + 22, y + 29, 12, 3), AMBER);
+            cv.line_w(x + 36, y + 8, x + 36, y + 20, 2, WHITE);
+            cv.line_w(x + 30, y + 14, x + 42, y + 14, 2, WHITE);
+        }
     }
     // Glossy top highlight.
     cv.round(Rect::new(x + 3, y + 2, 42, 10), 5, WHITE, 26);
@@ -437,12 +458,35 @@ fn kv(cv: &mut Canvas, x: i32, y: i32, k: &[u8], v: &[u8], vc: u32) {
 }
 
 /// Draw the body of `app` into `body` (already filled with the panel colour by the caller).
-pub(crate) fn draw_body(cv: &mut Canvas, app: App, body: Rect, v: &View, term: &Term, scroll: i32) {
+pub(crate) fn draw_body(
+    cv: &mut Canvas,
+    app: App,
+    body: Rect,
+    v: &View,
+    terms: (&Term, &Term),
+    scroll: i32,
+) {
+    let term = terms.0;
     let x = body.x + 16;
     let mut y = body.y + 14;
     let lh = line_h(1) + 4;
     match app {
-        App::Console => draw_console(cv, body, term, v),
+        App::Console => draw_console(cv, body, term, v, b"asolaria> ", None),
+        App::Claude => draw_console(
+            cv,
+            body,
+            terms.1,
+            v,
+            b"opus> ",
+            Some((
+                if v.claude_busy {
+                    b"thinking..." as &[u8]
+                } else {
+                    v.bridge_note
+                },
+                if v.bridge_ok { GREEN } else { AMBER },
+            )),
+        ),
         App::System => {
             let mut b = Buf::new();
             kv(
@@ -700,6 +744,60 @@ pub(crate) fn pointer_line(b: &mut Buf, v: &View) {
     }
 }
 
+/// "Touchpad  I2C-HID ready  ctl 0:15.1 8086:a369 bar .. comp .. D3->D0" (probe outcome).
+pub(crate) fn i2c_line1(b: &mut Buf, r: &crate::i2chid::Report) {
+    b.s(b"Touchpad   I2C-HID ")
+        .s(r.stage.text())
+        .s(b"  controllers ")
+        .dec(r.controllers as u64);
+    if r.controllers > 0 {
+        b.s(b"  last 0:")
+            .hex(&[r.dev])
+            .s(b".")
+            .dec(r.fun as u64)
+            .s(b" 8086:")
+            .hex16(r.did)
+            .s(b"  bar ")
+            .hex(&r.bar.to_be_bytes())
+            .s(b"  comp ")
+            .hex(&r.comp_type.to_be_bytes())
+            .s(b"  was D")
+            .dec(r.pm_was as u64);
+    }
+}
+
+/// "  addr 2c  hid 06cb:7db5  rdesc 693  max_in 30  mouse id 2  gpio ..." (device side).
+pub(crate) fn i2c_line2(b: &mut Buf, r: &crate::i2chid::Report) {
+    b.s(b"           addr ")
+        .hex(&[r.addr])
+        .s(b"  hid ")
+        .hex16(r.vid)
+        .s(b":")
+        .hex16(r.pid)
+        .s(b"  rdesc ")
+        .dec(r.rdesc_len as u64)
+        .s(b"  max_in ")
+        .dec(r.max_in as u64)
+        .s(b"  mouse_id ")
+        .dec(r.mouse_id as u64)
+        .s(b"  abort ")
+        .hex(&r.last_abort.to_be_bytes())
+        .s(b"  gpio padbar ")
+        .hex(&r.gpio_padbar.to_be_bytes())
+        .s(b" dw0 ")
+        .hex(&r.gpio_dw0.to_be_bytes())
+        .s(if r.gpio_saw_low {
+            b" saw-low"
+        } else {
+            b" never-low"
+        })
+        .s(if r.gpio_used {
+            b" irq-gated"
+        } else {
+            b" blind-poll"
+        });
+}
+
 pub(crate) fn hms(b: &mut Buf, s: u64) {
     b.dec(s / 3600)
         .s(b":")
@@ -735,7 +833,14 @@ pub(crate) fn button(cv: &mut Canvas, r: Rect, label: &[u8], c: u32) {
     }
 }
 
-fn draw_console(cv: &mut Canvas, body: Rect, t: &Term, v: &View) {
+fn draw_console(
+    cv: &mut Canvas,
+    body: Rect,
+    t: &Term,
+    v: &View,
+    prompt: &[u8],
+    status: Option<(&[u8], u32)>,
+) {
     cv.fill(body, rgb(0x02, 0x04, 0x08));
     let lh = line_h(1) + 2;
     let x = body.x + 10;
@@ -770,10 +875,14 @@ fn draw_console(cv: &mut Canvas, body: Rect, t: &Term, v: &View) {
     // Input line pinned at the bottom.
     let iy = body.y + body.h - lh - 6;
     cv.fill(Rect::new(body.x, iy - 4, body.w, 1), rgb(0x16, 0x22, 0x38));
-    let px = cv.text(x, iy, b"asolaria> ", AMBER, 1);
+    let px = cv.text(x, iy, prompt, AMBER, 1);
     let ex = cv.text(px, iy, &t.input[..t.ilen], WHITE, 1);
     if v.caret && v.focused {
         cv.fill(Rect::new(ex + 1, iy + 2, 7, 13), CYAN);
+    }
+    if let Some((s, c)) = status {
+        let w = text_w(s, 1);
+        cv.text(body.x + body.w - w - 12, iy, s, c, 1);
     }
     if t.scroll > 0 {
         let mut b = Buf::new();
@@ -815,6 +924,18 @@ fn draw_devices(cv: &mut Canvas, body: Rect, v: &View, scroll: i32) {
         1,
     );
     y += lh;
+    if let Some(r) = v.i2c {
+        let ok = r.stage == crate::i2chid::Stage::Ready;
+        let c = if ok { GREEN } else { AMBER };
+        b = Buf::new();
+        i2c_line1(&mut b, &r);
+        cv.text(x, y, b.get(), c, 1);
+        y += lh;
+        b = Buf::new();
+        i2c_line2(&mut b, &r);
+        cv.text(x, y, b.get(), c, 1);
+        y += lh;
+    }
     let st: &[u8] = if v.facts.rst_vmd {
         b"Storage    Intel RST/VMD 8086:282A gate MATCHED (scaffold: VMD walk is the next step)"
     } else {

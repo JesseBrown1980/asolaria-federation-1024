@@ -31,6 +31,7 @@ members = [
     "tools/recall-serve",
     "tools/hookwall-session-start",
     "tools/hookwall-edge",
+    "tools/asios-claude-bridge",
 ]
 
 [workspace.package]

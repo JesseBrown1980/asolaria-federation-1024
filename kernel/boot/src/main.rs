@@ -3,12 +3,14 @@
 
 mod apps;
 mod bootproj;
+mod bridge;
 mod console;
 mod driver_rst_vmd;
 mod font;
 mod gfx;
 mod gui;
 mod hwinv;
+mod i2chid;
 mod init;
 mod pointer;
 mod ps2mouse;
