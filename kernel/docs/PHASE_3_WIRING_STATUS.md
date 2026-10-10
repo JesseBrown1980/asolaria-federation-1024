@@ -59,6 +59,8 @@ The detailed matrix below pre-dates these updates; cross-check against `kernel/c
 | 15 | `sys_tier_query` | **WIRED** ✓ | `tier::classify_path` (real impl); UTF-8 path validation; `UnclassifiedDefault`→`Public` | cycle-31 |
 | 16 | `sys_gnn_infer` | **WIRED** ✓ | `gnn::GnnInference::predict_route`; encodes `RoutingDecision` as 1-byte (0=Local..6=UnicastAether); deterministic fallback when model unloaded | cycle-34 |
 
+> **2026-10-09 correction (beside, not over rows 12-13):** passing the raw init envelope put the ASCII type byte (e.g. `'P'` = 0x50 = 80) into `byte[0]=slot`, which is always >= `HOOKWALL_SLOT_COUNT` (64), so every init dispatch returned `Err` -> Block and no verdict row was ever appended. `boot/src/init.rs` now passes `[syscall_no - 1, syscall_no]` (EXEC = 3, other envelope dispatch = 10). The synthesis in `syscall/mod.rs` is unchanged. MEASURED in QEMU+OVMF: PING->PONG, VERS, PIDA replies now return.
+
 ## Wire count: **6 FULL + 8 HALF = 14/16 surface-reserved** (post-cycle-66)
 
 Plus `sys_fork` doc-only and `sys_exit` diverging spin-loop stub → **all 16 canonical syscalls have explicit Phase-3 doctrine attached**, none are bare `Err(Unimplemented)` stubs anymore.

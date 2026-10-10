@@ -48,6 +48,8 @@ jobs:
         run: cargo test --manifest-path kernel/Cargo.toml -p asolaria-kernel-core --all-targets -- --test-threads=1
       - name: cargo clippy (kernel core)
         run: cargo clippy --manifest-path kernel/Cargo.toml -p asolaria-kernel-core --all-targets -- -D warnings
+      - name: cargo clippy (kernel boot, UEFI target)
+        run: cargo clippy --manifest-path kernel/Cargo.toml -p asolaria-kernel-boot --target x86_64-unknown-uefi -- -D warnings
       - name: cargo build (kernel UEFI release)
         run: cargo build --manifest-path kernel/Cargo.toml --release --target x86_64-unknown-uefi --bin asolaria-os
       - name: inspect kernel UEFI PE/COFF artifact

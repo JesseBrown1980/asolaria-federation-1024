@@ -92,6 +92,9 @@ fn put_u32(buf: &mut [u8], i: usize, v: u32) -> usize {
     i
 }
 
+/// Enumeration stops after this many device-functions.
+pub(crate) const DEVICE_CAP: u32 = 64;
+
 // ---------------------------------------------------------------- hardware tuple
 /// Cap on the canonical tuple: 6 bytes per device-function, so 512 covers 85 functions
 /// (a laptop presents far fewer). The sha256 buffer below is sized for this cap.
@@ -320,6 +323,7 @@ fn emit_device_pid(t: &HwTuple) -> [u8; 32] {
 pub(crate) struct HwSummary {
     pub device_digest: [u8; 32],
     pub rst_vmd: bool,
+    pub devices: u32,
 }
 
 /// Enumerate PCI config space, print each present device over serial, and mint the
@@ -376,12 +380,13 @@ pub unsafe fn pci_scan() -> HwSummary {
                 serial_print(&line[..i]);
 
                 tuple.push(vendor, device, class, subclass);
-                if tuple.count >= 64 {
+                if tuple.count >= DEVICE_CAP {
                     serial_print(b"  hwinv . (capped at 64 device-functions)\r\n");
                     let device_digest = emit_device_pid(&tuple);
                     return HwSummary {
                         device_digest,
                         rst_vmd: tuple.rst_vmd,
+                        devices: tuple.count,
                     };
                 }
             }
@@ -392,5 +397,6 @@ pub unsafe fn pci_scan() -> HwSummary {
     HwSummary {
         device_digest,
         rst_vmd: tuple.rst_vmd,
+        devices: tuple.count,
     }
 }
