@@ -151,12 +151,18 @@ fn env_usize(key: &str, default: usize) -> usize {
 }
 
 /// Read a q value (per-mille integer, 0..=1000) from the environment. Integer only.
+/// A set-but-invalid value (e.g. the old decimal `0.7`) falls back to `default_q` and says so.
 fn env_q(key: &str, default_q: u16) -> u16 {
-    std::env::var(key)
-        .ok()
-        .and_then(|s| s.trim().parse::<u16>().ok())
-        .filter(|q| *q <= 1000)
-        .unwrap_or(default_q)
+    let Ok(raw) = std::env::var(key) else {
+        return default_q;
+    };
+    match raw.trim().parse::<u16>() {
+        Ok(q) if q <= 1000 => q,
+        _ => {
+            eprintln!("ENV_Q|key={key}|raw={raw}|threshold_source=default|q={default_q}|json=0");
+            default_q
+        }
+    }
 }
 
 /// Pure: parse an ndjson loop ledger, run the confidence schedule, render json=0 HBP rows. Never fires.
@@ -243,8 +249,11 @@ fn json_unit_q(s: &str, key: &str) -> Option<u16> {
     let end = after
         .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+'))
         .unwrap_or(after.len());
+    if matches!(after[end..].chars().next(), Some('e' | 'E')) {
+        return None;
+    }
     let tok = after.get(..end)?.trim();
-    if tok.is_empty() || tok.contains('e') || tok.contains('E') {
+    if tok.is_empty() {
         return None;
     }
     let neg = tok.starts_with('-');
@@ -1095,6 +1104,11 @@ mod tests {
             json_unit_q(r#"{"label":"score","score":0.5}"#, "score"),
             Some(500)
         );
+        // exponent notation is rejected, not misread as 1000 / 500
+        assert_eq!(json_unit_q(r#"{"score":8e-1}"#, "score"), None);
+        assert_eq!(json_unit_q(r#"{"score":0.5e1}"#, "score"), None);
+        assert_eq!(json_unit_q(r#"{"score":0.8E0}"#, "score"), None);
+        assert_eq!(json_unit_q(r#"{"score":1.5}"#, "score"), Some(1000));
         // a key that only ever appears as a value (never a real key) -> None, not the value text
         assert_eq!(json_u64(r#"{"hash":"seq"}"#, "seq"), None);
     }

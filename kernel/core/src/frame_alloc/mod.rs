@@ -145,12 +145,14 @@ mod tests {
 
     #[test]
     fn alloc_zero_len_returns_invalid_len() {
+        let _g = crate::test_sync::serial();
         reset_for_tests();
         assert_eq!(alloc_pages(0), Err(FrameErr::InvalidLen));
     }
 
     #[test]
     fn alloc_one_byte_rounds_to_full_page() {
+        let _g = crate::test_sync::serial();
         reset_for_tests();
         let p = alloc_pages(1).expect("first single-byte alloc must succeed");
         assert_eq!(
@@ -166,6 +168,7 @@ mod tests {
 
     #[test]
     fn alloc_returns_page_aligned_pointers() {
+        let _g = crate::test_sync::serial();
         reset_for_tests();
         let p1 = alloc_pages(8000).expect("alloc must succeed");
         let p2 = alloc_pages(4096).expect("alloc must succeed");
@@ -176,6 +179,7 @@ mod tests {
 
     #[test]
     fn alloc_exhausting_pool_returns_pool_exhausted() {
+        let _g = crate::test_sync::serial();
         reset_for_tests();
         let p = alloc_pages(POOL_BYTES).expect("one-shot pool-sized alloc must succeed");
         assert_eq!(p as usize, VIRTUAL_BASE_START);
@@ -185,12 +189,14 @@ mod tests {
 
     #[test]
     fn alloc_oversized_first_request_returns_pool_exhausted() {
+        let _g = crate::test_sync::serial();
         reset_for_tests();
         assert_eq!(alloc_pages(POOL_BYTES + 1), Err(FrameErr::PoolExhausted));
     }
 
     #[test]
     fn free_null_pointer_returns_invalid_pointer() {
+        let _g = crate::test_sync::serial();
         assert_eq!(
             free_pages(core::ptr::null_mut(), PAGE_BYTES),
             Err(FrameErr::InvalidPointer)
@@ -199,6 +205,7 @@ mod tests {
 
     #[test]
     fn free_zero_len_returns_invalid_len() {
+        let _g = crate::test_sync::serial();
         // Non-null in-range pointer + zero len -> InvalidLen.
         assert_eq!(
             free_pages(VIRTUAL_BASE_START as *mut u8, 0),
@@ -208,6 +215,7 @@ mod tests {
 
     #[test]
     fn free_out_of_range_pointer_returns_invalid_pointer() {
+        let _g = crate::test_sync::serial();
         // Below the range.
         assert_eq!(
             free_pages(0x800 as *mut u8, PAGE_BYTES),
@@ -222,6 +230,7 @@ mod tests {
 
     #[test]
     fn free_unaligned_in_range_pointer_returns_not_page_aligned() {
+        let _g = crate::test_sync::serial();
         // VIRTUAL_BASE_START + 1 is in range but not page-aligned.
         assert_eq!(
             free_pages((VIRTUAL_BASE_START + 1) as *mut u8, PAGE_BYTES),
@@ -231,6 +240,7 @@ mod tests {
 
     #[test]
     fn alloc_then_free_round_trip_succeeds() {
+        let _g = crate::test_sync::serial();
         reset_for_tests();
         let p = alloc_pages(8192).expect("alloc must succeed");
         assert_eq!(

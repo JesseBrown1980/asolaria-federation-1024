@@ -91,6 +91,9 @@ pub struct FischerScore {
     pub l0_real: bool,
     /// Shannon signal as q in 0..=1000 (per-mille; integer only).
     pub shannon_q: u16,
+    /// The true Shannon value lies strictly above `shannon_q / 1000` (digits past the
+    /// third decimal rounded down, or the input exceeded 1.000 and was capped).
+    pub shannon_above: bool,
     pub g4_state: String,
 }
 
@@ -100,6 +103,7 @@ impl Default for FischerScore {
             composite: "0".to_string(),
             l0_real: false,
             shannon_q: 0,
+            shannon_above: false,
             g4_state: "UNKNOWN".to_string(),
         }
     }
@@ -356,7 +360,7 @@ fn compute_cpl(envelope: &FischerEnvelope, score: &FischerScore) -> (i32, Vec<&'
         cpl += 100;
         flags.push("bloat_delta");
     }
-    if score.shannon_q > 920 && !matches!(verb, "write" | "export" | "generate") {
+    if shannon_over(score, 920) && !matches!(verb, "write" | "export" | "generate") {
         cpl += 120;
         flags.push("entropy_delta");
     }
@@ -475,55 +479,67 @@ pub fn parse_bool(value: Option<&str>) -> bool {
 }
 
 /// Parse a q value (per-mille integer, 0..=1000) from a string field. Integer only:
-/// replaces the previous `parse_q`. Values outside 0..=1000 fall back to `default`.
+/// surrounding whitespace is ignored; values outside 0..=1000 fall back to `default`.
 pub fn parse_q(value: Option<&str>, default: u16) -> u16 {
-    value
-        .and_then(|v| v.parse::<u16>().ok())
-        .filter(|q| *q <= 1000)
-        .unwrap_or(default)
+    parse_q_strict(value).unwrap_or(default)
 }
 
-/// Parse a decimal string ("0.55", "1", "0.923", ".5") into per-mille q (0..=1000) WITHOUT
-/// floats: integer part and up to three fraction digits are read as text; the 4th fraction
-/// digit rounds half-up. Keeps the live wire format (`shannon=0.55`) while the core stays
-/// integer-only. Anything unparsable or above 1.000 falls back to `default`.
+/// `parse_q` without a default: `None` when absent, unparsable or above 1000.
+pub fn parse_q_strict(value: Option<&str>) -> Option<u16> {
+    value
+        .and_then(|v| v.trim().parse::<u16>().ok())
+        .filter(|q| *q <= 1000)
+}
+
+/// True when the score's Shannon value is strictly above `line_q / 1000`, judged on the
+/// exact input (not only its rounded per-mille).
+pub fn shannon_over(score: &FischerScore, line_q: u16) -> bool {
+    score.shannon_q > line_q || (score.shannon_q == line_q && score.shannon_above)
+}
+
+/// Parse a decimal string ("0.55", "1", "+0.923", ".5", "3") into per-mille q WITHOUT
+/// floats. The integer part and fraction digits are read as text; the 4th fraction digit
+/// rounds half-up. Non-negative values above 1.000 are capped at 1000 (they still count as
+/// over any threshold). Anything unparsable falls back to `default`.
 pub fn parse_decimal_q(value: Option<&str>, default: u16) -> u16 {
-    let Some(v) = value.map(str::trim) else {
-        return default;
-    };
+    parse_decimal_q_exact(value).map_or(default, |(q, _)| q)
+}
+
+/// `parse_decimal_q` returning `(q, above)`, where `above` is true when the exact input is
+/// strictly greater than `q / 1000`. `None` when absent or unparsable.
+pub fn parse_decimal_q_exact(value: Option<&str>) -> Option<(u16, bool)> {
+    let v = value?.trim();
+    let v = v.strip_prefix('+').unwrap_or(v);
     let (int_part, frac_part) = match v.split_once('.') {
         Some((i, f)) => (i, f),
         None => (v, ""),
     };
-    let int_ok = int_part.is_empty() || int_part.bytes().all(|b| b.is_ascii_digit());
-    if !int_ok
+    if !int_part.bytes().all(|b| b.is_ascii_digit())
         || !frac_part.bytes().all(|b| b.is_ascii_digit())
         || (int_part.is_empty() && frac_part.is_empty())
     {
-        return default;
+        return None;
     }
-    let whole: u32 = if int_part.is_empty() {
-        0
-    } else {
-        match int_part.parse::<u32>() {
-            Ok(n) if n <= 1 => n,
-            _ => return default,
-        }
-    };
+    let int_digits = int_part.trim_start_matches('0');
     let fb = frac_part.as_bytes();
+    let frac_nonzero = fb.iter().any(|b| *b != b'0');
+    if !int_digits.is_empty() && int_digits != "1" {
+        return Some((1000, true));
+    }
+    if int_digits == "1" {
+        return Some((1000, frac_nonzero));
+    }
     let mut milli: u32 = 0;
     for k in 0..3 {
         milli = milli * 10 + fb.get(k).map_or(0, |b| u32::from(b - b'0'));
     }
-    if fb.get(3).is_some_and(|b| *b >= b'5') {
+    let tail = fb.get(3..).unwrap_or(&[]);
+    let tail_nonzero = tail.iter().any(|b| *b != b'0');
+    if tail.first().is_some_and(|b| *b >= b'5') {
         milli += 1;
+        return Some((milli as u16, false));
     }
-    let q = whole * 1000 + milli;
-    if q > 1000 {
-        default
-    } else {
-        q as u16
-    }
+    Some((milli as u16, tail_nonzero))
 }
 
 /// Render a per-mille q as the fixed 3-decimal text the HBP rows always carried
@@ -800,6 +816,7 @@ mod tests {
             composite: "0.85".to_string(),
             l0_real: true,
             shannon_q: 550,
+            shannon_above: false,
             g4_state: "UNKNOWN".to_string(),
         }
     }
@@ -874,6 +891,7 @@ mod tests {
                 composite: "0.40".to_string(),
                 l0_real: false,
                 shannon_q: 550,
+                shannon_above: false,
                 g4_state: "UNKNOWN".to_string(),
             },
             false,
@@ -932,11 +950,50 @@ mod tests {
         assert_eq!(parse_decimal_q(Some("0.9235"), 7), 924); // 4th digit rounds half-up
         assert_eq!(parse_decimal_q(Some("0.9234"), 7), 923);
         assert_eq!(parse_decimal_q(Some("0"), 7), 0);
-        assert_eq!(parse_decimal_q(Some("1.5"), 7), 7); // above 1.000 -> default
+        assert_eq!(parse_decimal_q(Some("1.5"), 7), 1000); // above 1.000 -> capped
+        assert_eq!(parse_decimal_q(Some("5"), 7), 1000);
+        assert_eq!(parse_decimal_q(Some("+0.95"), 7), 950);
         assert_eq!(parse_decimal_q(Some("-0.1"), 7), 7);
         assert_eq!(parse_decimal_q(Some("abc"), 7), 7);
         assert_eq!(parse_decimal_q(Some("."), 7), 7);
         assert_eq!(parse_decimal_q(None, 7), 7);
+    }
+
+    #[test]
+    fn shannon_threshold_is_exact_on_the_input_text() {
+        let over = |s: &str| {
+            let (q, above) = parse_decimal_q_exact(Some(s)).unwrap();
+            shannon_over(
+                &FischerScore {
+                    shannon_q: q,
+                    shannon_above: above,
+                    ..FischerScore::default()
+                },
+                920,
+            )
+        };
+        // Old float rule: shannon > 0.92.
+        for s in [
+            "0.9204",
+            "0.92049",
+            "0.92001",
+            "0.9205",
+            "0.921",
+            "1",
+            "1.0005",
+            "5",
+            "99999999999",
+        ] {
+            assert!(over(s), "{s} must be over 0.92");
+        }
+        for s in ["0.92", "0.9200", "0.920000", "0.9199", "0.5", "0"] {
+            assert!(!over(s), "{s} must not be over 0.92");
+        }
+        assert_eq!(parse_decimal_q_exact(Some("1.0000")), Some((1000, false)));
+        assert_eq!(parse_decimal_q_exact(Some("0.9995")), Some((1000, false)));
+        assert_eq!(parse_decimal_q_exact(Some("-0.1")), None);
+        assert_eq!(parse_q(Some(" 950 "), 0), 950);
+        assert_eq!(parse_q_strict(Some("1001")), None);
     }
 
     #[test]

@@ -612,7 +612,7 @@ mod tests {
         let s = DeterministicScorer;
         let a = s.score_q(b"hello world");
         assert_eq!(a, s.score_q(b"hello world"), "deterministic");
-        assert!(a <= 1000, "bounded to 0..=1000 per-mille");
+        assert!(a < 1000, "bounded to 0..=1000 per-mille");
         assert_eq!(s.score_q(b""), 0);
     }
 }

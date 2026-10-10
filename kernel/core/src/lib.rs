@@ -74,3 +74,32 @@ pub const KERNEL_VERSION: &str = "0.2.0-phase3-scaffold";
 
 /// Federation anchor PID for any kernel-emitted envelope.
 pub const FEDERATION_ANCHOR_PID: &str = "ASOLARIA-FEDERATION-REMAKE-1024-PID-2026-05-11";
+
+/// Test-only: the envelope slot, the frame allocator and the VFS FD table are process-global,
+/// so tests that reset or use them must not interleave when the harness runs tests in parallel.
+/// A no_std spin lock, taken once per test as its first statement; released on drop, also on
+/// panic-unwind. Never take it twice in one test (it is not re-entrant).
+#[cfg(test)]
+pub(crate) mod test_sync {
+    use core::sync::atomic::{AtomicBool, Ordering};
+
+    static LOCK: AtomicBool = AtomicBool::new(false);
+
+    pub(crate) struct Guard;
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            LOCK.store(false, Ordering::Release);
+        }
+    }
+
+    pub(crate) fn serial() -> Guard {
+        while LOCK
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            core::hint::spin_loop();
+        }
+        Guard
+    }
+}
