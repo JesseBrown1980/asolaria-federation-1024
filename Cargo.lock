@@ -3,6 +3,10 @@
 version = 3
 
 [[package]]
+name = "asios-claude-bridge"
+version = "0.1.0"
+
+[[package]]
 name = "asolaria-host8-serve"
 version = "0.1.0"
 dependencies = [
