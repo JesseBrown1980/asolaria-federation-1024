@@ -10,6 +10,7 @@ use crate::hwinv::put_bytes;
 use crate::serial_print;
 
 /// Wall-clock (UTC as the RTC holds it) + a monotonic TSC tick captured at boot.
+#[derive(Clone, Copy)]
 pub(crate) struct BootTime {
     pub year: u16,
     pub month: u8,
@@ -43,7 +44,7 @@ fn bcd_to_bin(v: u8) -> u8 {
 }
 
 /// Read the 64-bit Time Stamp Counter (monotonic since power-on).
-fn rdtsc() -> u64 {
+pub(crate) fn rdtsc() -> u64 {
     let lo: u32;
     let hi: u32;
     // SAFETY: rdtsc has no memory effects and is available on every x86_64.
@@ -80,11 +81,35 @@ impl BootTime {
 
 /// Read the boot wall-clock from the CMOS RTC + a TSC tick, and emit a BOOTTIME row.
 pub(crate) unsafe fn read_boot_time() -> BootTime {
+    let bt = now();
+    emit_boottime(&bt);
+    bt
+}
+
+/// Read the CMOS RTC + a TSC tick without emitting a row.
+pub(crate) unsafe fn now() -> BootTime {
+    read_rtc(1_000_000).unwrap_or_else(|| read_fields())
+}
+
+/// The desktop's periodic clock read: waits at most ~2,000 status reads (~2 ms) for an
+/// update-in-progress to clear; None means "busy, keep the last time".
+pub(crate) unsafe fn now_bounded() -> Option<BootTime> {
+    read_rtc(2_000)
+}
+
+unsafe fn read_rtc(max_wait: u32) -> Option<BootTime> {
     // Wait out any update-in-progress (status A bit 7) so the fields are coherent.
     let mut guard = 0u32;
-    while cmos_read(0x0A) & 0x80 != 0 && guard < 1_000_000 {
+    while cmos_read(0x0A) & 0x80 != 0 {
         guard += 1;
+        if guard >= max_wait {
+            return None;
+        }
     }
+    Some(read_fields())
+}
+
+unsafe fn read_fields() -> BootTime {
     let raw_sec = cmos_read(0x00);
     let raw_min = cmos_read(0x02);
     let raw_hour = cmos_read(0x04);
@@ -121,7 +146,7 @@ pub(crate) unsafe fn read_boot_time() -> BootTime {
     };
     let year = century * 100 + yy;
 
-    let bt = BootTime {
+    BootTime {
         year,
         month,
         day,
@@ -129,9 +154,7 @@ pub(crate) unsafe fn read_boot_time() -> BootTime {
         min,
         sec,
         tsc: rdtsc(),
-    };
-    emit_boottime(&bt);
-    bt
+    }
 }
 
 /// Emit `BOOTTIME|utc=YYYY-MM-DDTHH:MM:SSZ|tsc=<dec>|src=cmos_rtc+tsc|json=0`.

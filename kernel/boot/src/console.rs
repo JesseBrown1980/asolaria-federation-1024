@@ -1,22 +1,20 @@
-//! On-screen console · the fix for "boots, then sits on the loading screen forever".
+//! Console core · the command set shared by the text console and the desktop's Console window.
 //!
-//! Before this module the boot path painted the ASOLARIA ASI OS splash and handed off to
-//! `init::run()`, an envelope loop with no input source and no screen output: the machine was
-//! running, but nothing could ever reach it and nothing was ever drawn again. On real firmware
-//! the UEFI watchdog (armed by the boot manager, 5 minutes) then reset the machine, which reads
-//! as "hangs on the logo, then falls back to Windows".
+//! History: before 2026-10-09 the boot path painted the splash and handed off to `init::run()`,
+//! an envelope loop with no input source and no screen output, and the UEFI watchdog (armed by
+//! the boot manager, 5 minutes) reset the machine — "hangs on the logo, then back to Windows".
+//! This module:
+//!   1. disables the UEFI watchdog (`SetWatchdogTimer(0, 0, 0, null)`), status shown as returned,
+//!   2. keeps the splash up briefly, then starts the graphical desktop (`gui`) when the firmware
+//!      gives a usable framebuffer, else the firmware text console (ConOut),
+//!   3. turns each command line into a real init envelope (`PING`/`VERS`/`PIDA`) driven through
+//!      `init::exchange` — the SAME [`execute`] serves the text console and the Console window,
+//!      writing to whatever [`Sink`] the caller supplies,
+//!   4. `reboot` / `poweroff` go through UEFI `ResetSystem` (never a silent spin).
 //!
-//! This console:
-//!   1. disables the UEFI watchdog (`SetWatchdogTimer(0, 0, 0, null)`),
-//!   2. keeps the splash up briefly, then clears to the firmware text console (ConOut),
-//!   3. shows the boot facts (device_pid, boot_pid, UTC, PCI count, storage driver gate),
-//!   4. reads the keyboard through UEFI ConIn and turns each command line into a real
-//!      init envelope (`PING`/`VERS`/`PIDA`/...), driven through `init::exchange`, and prints the
-//!      reply — so the envelope-REPL is reachable from a keyboard,
-//!   5. `reboot` / `poweroff` go through UEFI `ResetSystem` (never a silent spin).
-//!
-//! Integer only. No allocation. E=0: nothing here fires an engine.
+//! Integer only. No heap. E=0: nothing here fires an engine.
 
+use crate::hwinv::PciDev;
 use crate::init;
 use crate::{EfiSystemTable, EfiTableHeader};
 use asolaria_kernel_core::envelope::ENVELOPE_SLOT_BYTES;
@@ -27,8 +25,8 @@ const EFI_UNSUPPORTED: usize = (1usize << 63) | 3;
 
 #[repr(C)]
 pub(crate) struct InputKey {
-    scan_code: u16,
-    unicode_char: u16,
+    pub scan_code: u16,
+    pub unicode_char: u16,
 }
 
 #[repr(C)]
@@ -77,18 +75,19 @@ pub(crate) struct BootFacts {
     pub utc_len: usize,
     pub pci_devices: u32,
     pub rst_vmd: bool,
+    pub pci: [PciDev; crate::hwinv::DEVICE_CAP as usize],
 }
 
 /// Outcome of the watchdog-disable call, shown as returned (never assumed).
 #[derive(Clone, Copy)]
-enum Watchdog {
+pub(crate) enum Watchdog {
     Disabled,
     Unsupported,
     Failed,
     NoBootServices,
 }
 
-fn watchdog_text(wd: Watchdog) -> &'static [u8] {
+pub(crate) fn watchdog_text(wd: Watchdog) -> &'static [u8] {
     match wd {
         Watchdog::Disabled => b"disabled",
         Watchdog::Unsupported => b"none on this firmware",
@@ -110,15 +109,307 @@ pub(crate) unsafe fn panic_reset() {
     }
 }
 
-struct Con {
+// ------------------------------------------------------------------ output sinks
+
+/// Colour role of console output; each front-end maps it to its own palette.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Tone {
+    Normal,
+    Accent,
+    Warn,
+    Error,
+}
+
+/// Where command output goes: the firmware text console or a desktop window.
+pub(crate) trait Sink {
+    /// Printable ASCII and '\n' only (callers sanitise untrusted bytes with [`text`]).
+    fn put(&mut self, s: &[u8]);
+    fn tone(&mut self, t: Tone);
+}
+
+/// Print untrusted bytes: anything outside printable ASCII becomes '.', so a NUL cannot cut the
+/// line short and control bytes never reach the screen.
+pub(crate) fn text(o: &mut dyn Sink, s: &[u8]) {
+    let mut b = [0u8; 64];
+    for chunk in s.chunks(b.len()) {
+        for (d, &x) in b.iter_mut().zip(chunk) {
+            *d = if (0x20..0x7F).contains(&x) { x } else { b'.' };
+        }
+        o.put(&b[..chunk.len()]);
+    }
+}
+
+pub(crate) fn hex(o: &mut dyn Sink, bytes: &[u8]) {
+    const H: &[u8; 16] = b"0123456789abcdef";
+    let mut b = [0u8; 64];
+    let mut n = 0;
+    for &x in bytes.iter().take(32) {
+        b[n] = H[(x >> 4) as usize];
+        b[n + 1] = H[(x & 15) as usize];
+        n += 2;
+    }
+    o.put(&b[..n]);
+}
+
+pub(crate) fn dec(o: &mut dyn Sink, v: u64) {
+    let mut b = [0u8; 20];
+    let n = fmt_dec(&mut b, v);
+    o.put(&b[20 - n..]);
+}
+
+/// Right-aligned decimal into `b` (20 bytes); returns the digit count.
+pub(crate) fn fmt_dec(b: &mut [u8; 20], mut v: u64) -> usize {
+    let mut n = 0;
+    loop {
+        n += 1;
+        b[20 - n] = b'0' + (v % 10) as u8;
+        v /= 10;
+        if v == 0 {
+            break;
+        }
+    }
+    n
+}
+
+// ------------------------------------------------------------------ shared context
+
+/// Everything the front-ends share: firmware handles, boot facts, the watchdog outcome and the
+/// envelope sequence counter.
+pub(crate) struct Ctx<'a> {
+    pub st: *mut EfiSystemTable,
     out: *mut TextOut,
     inp: *mut SimpleTextInput,
     bs: *mut BootSvc,
     rt: *mut RuntimeSvc,
+    pub facts: &'a BootFacts,
+    pub wd: Watchdog,
+    pub seq: u64,
+    /// Set by the desktop once it has started, so the text console can offer `desktop`.
+    pub gui_ok: bool,
+    /// Pointer report from the desktop, for `info` in either front-end.
+    pub pointer_simple: usize,
+    pub pointer_abs: usize,
 }
 
-impl Con {
-    unsafe fn print(&self, s: &[u8]) {
+impl Ctx<'_> {
+    pub(crate) unsafe fn stall_us(&self, us: usize) {
+        if !self.bs.is_null() {
+            ((*self.bs).stall)(us);
+        }
+    }
+
+    /// Non-blocking key read: Some(key) / None.
+    pub(crate) unsafe fn key(&self) -> Option<InputKey> {
+        if self.inp.is_null() {
+            return None;
+        }
+        let mut k = InputKey {
+            scan_code: 0,
+            unicode_char: 0,
+        };
+        // 0 = EFI_SUCCESS; anything else (EFI_NOT_READY when no key is waiting) = no key.
+        let st = ((*self.inp).read_key_stroke)(self.inp, &mut k);
+        (st == 0).then_some(k)
+    }
+
+    /// Show or hide the firmware text cursor (hidden while the desktop owns the screen).
+    pub(crate) unsafe fn text_cursor(&self, on: bool) {
+        if !self.out.is_null() {
+            ((*self.out).enable_cursor)(self.out, on);
+        }
+    }
+
+    /// UEFI ResetSystem: kind 0 = cold reset, 2 = shutdown. Returns only if firmware ignored it.
+    pub(crate) unsafe fn reset(&self, kind: u32) {
+        let _ = asolaria_kernel_core::syscall::sys_cosign_append(b"console-reset-request");
+        crate::serial_print(b"  CONSOLE|reset=requested|e=0|json=0\r\n");
+        self.stall_us(300_000);
+        if !self.rt.is_null() {
+            let _ = ((*self.rt).reset_system)(kind, 0, 0, core::ptr::null());
+        }
+    }
+}
+
+/// What the caller must do after a command.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Action {
+    None,
+    Clear,
+    Reset(u32),
+    Desktop,
+    TextMode,
+}
+
+pub(crate) fn help(o: &mut dyn Sink) {
+    o.put(b"  ping      envelope PING  -> init -> PONG\n");
+    o.put(b"  vers      envelope VERS  -> kernel version\n");
+    o.put(b"  pid       envelope PIDA  -> federation anchor PID\n");
+    o.put(b"  info      boot facts (device, boot pid, clock, pci)\n");
+    o.put(b"  devices   PCI inventory (read-only)\n");
+    o.put(b"  clear     clear the screen\n");
+    o.put(b"  desktop   graphical desktop     text   text console\n");
+    o.put(b"  reboot    UEFI cold reset       poweroff  UEFI shutdown\n");
+}
+
+/// The boot-facts block (`info`).
+pub(crate) fn info(o: &mut dyn Sink, c: &Ctx) {
+    let f = c.facts;
+    o.tone(Tone::Normal);
+    o.put(b"  device_pid  ");
+    hex(o, &f.device_digest[..8]);
+    o.put(b"\n  boot_pid    ");
+    hex(o, &f.boot_pid);
+    o.put(b"\n  boot_clock  ");
+    o.put(&f.utc[..f.utc_len]);
+    o.put(b"  (CMOS RTC)\n  pci         ");
+    dec(o, f.pci_devices as u64);
+    if f.pci_devices >= crate::hwinv::DEVICE_CAP {
+        o.put(b"+ (capped)");
+    }
+    o.put(b" device-functions   rst/vmd ");
+    o.put(if f.rst_vmd { b"MATCHED" } else { b"n/a" });
+    o.put(b"\n  watchdog    ");
+    o.put(watchdog_text(c.wd));
+    o.put(b"\n  pointer     simple=");
+    dec(o, c.pointer_simple as u64);
+    o.put(b" absolute=");
+    dec(o, c.pointer_abs as u64);
+    o.put(b"   E=0   fire=0\n");
+}
+
+/// One PCI row, `bb:dd.f  vvvv:dddd  cc:ss  <class name>`.
+pub(crate) fn devices(o: &mut dyn Sink, f: &BootFacts) {
+    let n = (f.pci_devices as usize).min(f.pci.len());
+    for d in &f.pci[..n] {
+        let mut b = [0u8; 40];
+        let mut i = crate::hwinv::put_bytes(&mut b, 0, b"  ");
+        i = crate::hwinv::put_hex8(&mut b, i, d.bus);
+        b[i] = b':';
+        i = crate::hwinv::put_hex8(&mut b, i + 1, d.dev);
+        b[i] = b'.';
+        b[i + 1] = b'0' + d.func;
+        i = crate::hwinv::put_bytes(&mut b, i + 2, b"  ");
+        i = crate::hwinv::put_hex8(&mut b, i, (d.vendor >> 8) as u8);
+        i = crate::hwinv::put_hex8(&mut b, i, d.vendor as u8);
+        b[i] = b':';
+        i = crate::hwinv::put_hex8(&mut b, i + 1, (d.device >> 8) as u8);
+        i = crate::hwinv::put_hex8(&mut b, i, d.device as u8);
+        i = crate::hwinv::put_bytes(&mut b, i, b"  ");
+        o.put(&b[..i]);
+        o.put(crate::apps::class_name(d.class, d.subclass));
+        o.put(b"\n");
+    }
+}
+
+/// Send one envelope type through the real init dispatch and print the reply.
+fn envelope(o: &mut dyn Sink, ty: &[u8; 4], seq: &mut u64) {
+    // As large as the bus slot itself, so a reply can never be left stuck in it.
+    let mut reply = [0u8; ENVELOPE_SLOT_BYTES];
+    match init::exchange(ty, seq, &mut reply) {
+        Ok(n) => {
+            o.tone(Tone::Accent);
+            text(o, &reply[..4]);
+            o.tone(Tone::Normal);
+            // payload starts after the 12-byte header; trim zero padding
+            let mut end = n;
+            while end > 12 && reply[end - 1] == 0 {
+                end -= 1;
+            }
+            if end > 12 {
+                o.put(b"  ");
+                text(o, &reply[12..end]);
+            }
+            o.put(b"\n");
+        }
+        Err(e) => {
+            o.tone(Tone::Error);
+            o.put(b"  envelope bus error: ");
+            o.put(e);
+            o.put(b"\n");
+            o.tone(Tone::Normal);
+        }
+    }
+}
+
+/// Run one command line. Output goes to `o`; the returned [`Action`] is the caller's to carry
+/// out (clearing its own screen, switching front-end, or resetting through [`Ctx::reset`]).
+pub(crate) fn execute(cmd: &[u8], o: &mut dyn Sink, c: &mut Ctx) -> Action {
+    let cmd = trim(cmd);
+    match cmd {
+        b"" => Action::None,
+        b"help" | b"?" => {
+            help(o);
+            Action::None
+        }
+        b"ping" => {
+            envelope(o, b"PING", &mut c.seq);
+            Action::None
+        }
+        b"vers" | b"version" => {
+            envelope(o, b"VERS", &mut c.seq);
+            Action::None
+        }
+        b"pid" => {
+            envelope(o, b"PIDA", &mut c.seq);
+            Action::None
+        }
+        b"info" => {
+            info(o, c);
+            Action::None
+        }
+        b"devices" | b"lspci" => {
+            devices(o, c.facts);
+            Action::None
+        }
+        b"clear" | b"cls" => Action::Clear,
+        b"desktop" | b"gui" => Action::Desktop,
+        b"text" => Action::TextMode,
+        b"reboot" | b"restart" => {
+            o.put(b"  resetting via UEFI ResetSystem\n");
+            Action::Reset(0)
+        }
+        b"poweroff" | b"shutdown" => {
+            o.put(b"  powering off via UEFI ResetSystem\n");
+            Action::Reset(2)
+        }
+        _ => {
+            o.tone(Tone::Error);
+            o.put(b"  unknown command: ");
+            text(o, cmd);
+            o.put(b"   (type 'help')\n");
+            o.tone(Tone::Normal);
+            Action::None
+        }
+    }
+}
+
+fn trim(s: &[u8]) -> &[u8] {
+    let mut a = 0;
+    let mut b = s.len();
+    while a < b && s[a] == b' ' {
+        a += 1;
+    }
+    while b > a && s[b - 1] == b' ' {
+        b -= 1;
+    }
+    &s[a..b]
+}
+
+// ------------------------------------------------------------------ text console front-end
+
+// EFI text attributes: foreground | background<<4.
+const CYAN: usize = 0x03 | 0x08; // light cyan
+const AMBER: usize = 0x0E; // yellow
+const GREY: usize = 0x07;
+const RED: usize = 0x0C;
+
+/// The firmware text console as a [`Sink`].
+struct TextSink {
+    out: *mut TextOut,
+}
+
+impl Sink for TextSink {
+    fn put(&mut self, s: &[u8]) {
         if self.out.is_null() {
             return;
         }
@@ -134,200 +425,67 @@ impl Con {
             i += 1;
             if i >= 126 {
                 buf[i] = 0;
-                ((*self.out).output_string)(self.out, buf.as_ptr());
+                // SAFETY: `out` is the firmware ConOut, valid while boot services are active.
+                unsafe { ((*self.out).output_string)(self.out, buf.as_ptr()) };
                 i = 0;
             }
         }
         buf[i] = 0;
-        ((*self.out).output_string)(self.out, buf.as_ptr());
+        // SAFETY: as above.
+        unsafe { ((*self.out).output_string)(self.out, buf.as_ptr()) };
     }
 
-    /// Print untrusted bytes: anything outside printable ASCII becomes '.', so a NUL cannot
-    /// cut the line short and control bytes never reach the screen.
-    unsafe fn text(&self, s: &[u8]) {
-        let mut b = [0u8; 64];
-        for chunk in s.chunks(b.len()) {
-            for (d, &x) in b.iter_mut().zip(chunk) {
-                *d = if (0x20..0x7F).contains(&x) { x } else { b'.' };
-            }
-            self.print(&b[..chunk.len()]);
-        }
-    }
-
-    unsafe fn hex(&self, bytes: &[u8]) {
-        const H: &[u8; 16] = b"0123456789abcdef";
-        let mut b = [0u8; 64];
-        let mut n = 0;
-        for &x in bytes.iter().take(32) {
-            b[n] = H[(x >> 4) as usize];
-            b[n + 1] = H[(x & 15) as usize];
-            n += 2;
-        }
-        self.print(&b[..n]);
-    }
-
-    unsafe fn dec(&self, mut v: u64) {
-        let mut b = [0u8; 20];
-        let mut n = b.len();
-        loop {
-            n -= 1;
-            b[n] = b'0' + (v % 10) as u8;
-            v /= 10;
-            if v == 0 {
-                break;
-            }
-        }
-        self.print(&b[n..]);
-    }
-
-    unsafe fn color(&self, attr: usize) {
-        if !self.out.is_null() {
-            ((*self.out).set_attribute)(self.out, attr);
-        }
-    }
-
-    unsafe fn stall_us(&self, us: usize) {
-        if !self.bs.is_null() {
-            ((*self.bs).stall)(us);
-        }
-    }
-
-    /// Non-blocking key read: Some(char or control) / None.
-    unsafe fn key(&self) -> Option<InputKey> {
-        if self.inp.is_null() {
-            return None;
-        }
-        let mut k = InputKey {
-            scan_code: 0,
-            unicode_char: 0,
+    fn tone(&mut self, t: Tone) {
+        let attr = match t {
+            Tone::Normal => GREY,
+            Tone::Accent => CYAN,
+            Tone::Warn => AMBER,
+            Tone::Error => RED,
         };
-        // 0 = EFI_SUCCESS; anything else (EFI_NOT_READY when no key is waiting) = no key.
-        let st = ((*self.inp).read_key_stroke)(self.inp, &mut k);
-        (st == 0).then_some(k)
-    }
-}
-
-// EFI text attributes: foreground | background<<4.
-const CYAN: usize = 0x03 | 0x08; // light cyan
-const AMBER: usize = 0x0E; // yellow
-const GREY: usize = 0x07;
-const RED: usize = 0x0C;
-
-unsafe fn banner(c: &Con, f: &BootFacts, wd: Watchdog) {
-    if !c.out.is_null() {
-        ((*c.out).clear_screen)(c.out);
-        ((*c.out).enable_cursor)(c.out, true);
-    }
-    c.color(CYAN);
-    c.print(b"  ASOLARIA ASI OS  .  kernel ");
-    c.print(asolaria_kernel_core::KERNEL_VERSION.as_bytes());
-    c.print(b"  .  federation-1024\n");
-    c.color(AMBER);
-    c.print(b"  ----------------------------------------------------------------\n");
-    c.color(GREY);
-    c.print(b"  device_pid  ");
-    c.hex(&f.device_digest[..8]);
-    c.print(b"\n  boot_pid    ");
-    c.hex(&f.boot_pid);
-    c.print(b"\n  boot_utc    ");
-    c.print(&f.utc[..f.utc_len]);
-    c.print(b"\n  pci         ");
-    c.dec(f.pci_devices as u64);
-    if f.pci_devices >= crate::hwinv::DEVICE_CAP {
-        c.print(b"+ (capped)");
-    }
-    c.print(b" device-functions   storage-driver(rst/vmd) ");
-    c.print(if f.rst_vmd { b"MATCHED" } else { b"n/a    " });
-    c.print(b"\n  watchdog    ");
-    c.print(watchdog_text(wd));
-    c.print(b"   E=0   fire=0\n");
-    c.color(AMBER);
-    c.print(b"  ----------------------------------------------------------------\n");
-    c.color(GREY);
-    c.print(b"  type 'help' for commands\n\n");
-}
-
-unsafe fn help(c: &Con) {
-    c.print(b"  ping      envelope PING  -> init -> PONG\n");
-    c.print(b"  vers      envelope VERS  -> kernel version\n");
-    c.print(b"  pid       envelope PIDA  -> federation anchor PID\n");
-    c.print(b"  info      boot facts (device, boot pid, clock, pci)\n");
-    c.print(b"  clear     redraw the screen\n");
-    c.print(b"  reboot    UEFI cold reset\n");
-    c.print(b"  poweroff  UEFI shutdown\n");
-}
-
-/// Send one envelope type through the real init dispatch and print the reply.
-unsafe fn envelope(c: &Con, ty: &[u8; 4], seq: &mut u64) {
-    // As large as the bus slot itself, so a reply can never be left stuck in it.
-    let mut reply = [0u8; ENVELOPE_SLOT_BYTES];
-    match init::exchange(ty, seq, &mut reply) {
-        Ok(n) => {
-            c.color(CYAN);
-            c.text(&reply[..4]);
-            c.color(GREY);
-            // payload starts after the 12-byte header; trim zero padding
-            let mut end = n;
-            while end > 12 && reply[end - 1] == 0 {
-                end -= 1;
-            }
-            if end > 12 {
-                c.print(b"  ");
-                c.text(&reply[12..end]);
-            }
-            c.print(b"\n");
-        }
-        Err(e) => {
-            c.color(RED);
-            c.print(b"  envelope bus error: ");
-            c.print(e);
-            c.print(b"\n");
-            c.color(GREY);
+        if !self.out.is_null() {
+            // SAFETY: firmware ConOut.
+            unsafe { ((*self.out).set_attribute)(self.out, attr) };
         }
     }
 }
 
-/// Run the console. Never returns.
-pub(crate) unsafe fn run(st: *mut EfiSystemTable, facts: &BootFacts) -> ! {
-    let c = Con {
-        out: (*st).con_out as *mut TextOut,
-        inp: (*st).con_in as *mut SimpleTextInput,
-        bs: (*st).boot_services as *mut BootSvc,
-        rt: (*st).runtime_services as *mut RuntimeSvc,
-    };
-    PANIC_RT.store(c.rt as usize, Ordering::Relaxed);
-    // 1. The watchdog: without this the firmware resets the machine 5 minutes after launch.
-    //    The firmware's status is reported as returned, not assumed.
-    let wd = if c.bs.is_null() {
-        Watchdog::NoBootServices
+unsafe fn banner(o: &mut TextSink, c: &Ctx) {
+    if !o.out.is_null() {
+        ((*o.out).clear_screen)(o.out);
+        ((*o.out).enable_cursor)(o.out, true);
+    }
+    o.tone(Tone::Accent);
+    o.put(b"  ASOLARIA ASI OS  .  kernel ");
+    o.put(asolaria_kernel_core::KERNEL_VERSION.as_bytes());
+    o.put(b"  .  federation-1024  .  text console\n");
+    o.tone(Tone::Warn);
+    o.put(b"  ----------------------------------------------------------------\n");
+    info(o, c);
+    o.tone(Tone::Warn);
+    o.put(b"  ----------------------------------------------------------------\n");
+    o.tone(Tone::Normal);
+    if c.gui_ok {
+        o.put(b"  type 'help' for commands, 'desktop' for the graphical desktop\n\n");
     } else {
-        match ((*c.bs).set_watchdog_timer)(0, 0, 0, core::ptr::null()) {
-            0 => Watchdog::Disabled,
-            EFI_UNSUPPORTED => Watchdog::Unsupported,
-            _ => Watchdog::Failed,
-        }
-    };
-    crate::serial_print(b"  CONSOLE|watchdog=");
-    crate::serial_print(watchdog_text(wd));
-    crate::serial_print(b"|input=uefi_conin|e=0|json=0\r\n");
-    // 2. Splash stays up 1.5 s, then the console takes the screen.
-    c.stall_us(1_500_000);
-    if !c.inp.is_null() {
-        ((*c.inp).reset)(c.inp, false);
+        o.put(b"  type 'help' for commands\n\n");
     }
-    banner(&c, facts, wd);
+}
 
-    let mut seq: u64 = 1;
-    // Start from an empty bus.
-    init::drain();
+/// The firmware text console. Returns when the user asks for the desktop and it is available.
+pub(crate) unsafe fn text_console(c: &mut Ctx) {
+    let mut o = TextSink { out: c.out };
+    banner(&mut o, c);
     let mut line = [0u8; 64];
     let mut len = 0usize;
     let mut last_cr = false;
-    c.color(AMBER);
-    c.print(b"asolaria> ");
-    c.color(GREY);
+    o.tone(Tone::Warn);
+    o.put(b"asolaria> ");
+    o.tone(Tone::Normal);
     loop {
         let Some(k) = c.key() else {
+            // Belt and braces: a mouse byte left in the i8042 output buffer would block every
+            // keyboard byte behind it (the firmware keyboard driver never reads aux bytes).
+            let _ = crate::ps2mouse::drain_aux();
             c.stall_us(10_000);
             continue;
         };
@@ -339,51 +497,81 @@ pub(crate) unsafe fn run(st: *mut EfiSystemTable, facts: &BootFacts) -> ! {
             continue;
         }
         if ch == 0x0D || ch == 0x0A {
-            c.print(b"\n");
-            let cmd = &line[..len];
-            match cmd {
-                b"" => {}
-                b"help" | b"?" => help(&c),
-                b"ping" => envelope(&c, b"PING", &mut seq),
-                b"vers" | b"version" => envelope(&c, b"VERS", &mut seq),
-                b"pid" => envelope(&c, b"PIDA", &mut seq),
-                b"info" | b"clear" => banner(&c, facts, wd),
-                b"reboot" | b"poweroff" => {
-                    let _ =
-                        asolaria_kernel_core::syscall::sys_cosign_append(b"console-reset-request");
-                    c.print(b"  resetting via UEFI ResetSystem\n");
-                    crate::serial_print(b"  CONSOLE|reset=requested|e=0|json=0\r\n");
-                    c.stall_us(500_000);
-                    if !c.rt.is_null() {
-                        let kind = if cmd == b"poweroff" { 2 } else { 0 };
-                        let _ = ((*c.rt).reset_system)(kind, 0, 0, core::ptr::null());
-                    }
-                    c.color(RED);
-                    c.print(b"  reset did not happen\n");
-                    c.color(GREY);
-                }
-                _ => {
-                    c.color(RED);
-                    c.print(b"  unknown command: ");
-                    c.text(cmd);
-                    c.print(b"   (type 'help')\n");
-                    c.color(GREY);
-                }
-            }
+            o.put(b"\n");
+            let mut cmd = [0u8; 64];
+            cmd[..len].copy_from_slice(&line[..len]);
+            let n = len;
             len = 0;
-            c.color(AMBER);
-            c.print(b"asolaria> ");
-            c.color(GREY);
+            match execute(&cmd[..n], &mut o, c) {
+                Action::Clear => banner(&mut o, c),
+                Action::Desktop if c.gui_ok => return,
+                Action::Desktop => o.put(b"  no usable framebuffer: the desktop is unavailable\n"),
+                Action::Reset(kind) => {
+                    c.reset(kind);
+                    o.tone(Tone::Error);
+                    o.put(b"  reset did not happen\n");
+                    o.tone(Tone::Normal);
+                }
+                Action::TextMode | Action::None => {}
+            }
+            o.tone(Tone::Warn);
+            o.put(b"asolaria> ");
+            o.tone(Tone::Normal);
         } else if ch == 0x08 {
             if len > 0 {
                 len -= 1;
-                c.print(b"\x08 \x08");
+                o.put(b"\x08 \x08");
             }
         } else if (0x20..0x7F).contains(&ch) && len < line.len() {
             let b = ch as u8;
             line[len] = b;
             len += 1;
-            c.print(&[b]);
+            o.put(&[b]);
         }
+    }
+}
+
+/// Run the console. Never returns.
+pub(crate) unsafe fn run(st: *mut EfiSystemTable, facts: &BootFacts) -> ! {
+    let mut c = Ctx {
+        st,
+        out: (*st).con_out as *mut TextOut,
+        inp: (*st).con_in as *mut SimpleTextInput,
+        bs: (*st).boot_services as *mut BootSvc,
+        rt: (*st).runtime_services as *mut RuntimeSvc,
+        facts,
+        wd: Watchdog::NoBootServices,
+        seq: 1,
+        gui_ok: false,
+        pointer_simple: 0,
+        pointer_abs: 0,
+    };
+    PANIC_RT.store(c.rt as usize, Ordering::Relaxed);
+    // 1. The watchdog: without this the firmware resets the machine 5 minutes after launch.
+    //    The firmware's status is reported as returned, not assumed.
+    c.wd = if c.bs.is_null() {
+        Watchdog::NoBootServices
+    } else {
+        match ((*c.bs).set_watchdog_timer)(0, 0, 0, core::ptr::null()) {
+            0 => Watchdog::Disabled,
+            EFI_UNSUPPORTED => Watchdog::Unsupported,
+            _ => Watchdog::Failed,
+        }
+    };
+    crate::serial_print(b"  CONSOLE|watchdog=");
+    crate::serial_print(watchdog_text(c.wd));
+    crate::serial_print(b"|input=uefi_conin|e=0|json=0\r\n");
+    // 2. Splash stays up 1.5 s, then the desktop (or the text console) takes the screen.
+    c.stall_us(1_500_000);
+    if !c.inp.is_null() {
+        ((*c.inp).reset)(c.inp, false);
+    }
+    // Start from an empty bus.
+    init::drain();
+    // The desktop runs until reset (it opens the text console itself when asked). It returns
+    // only when the firmware gives no usable framebuffer; then the text console is the OS.
+    crate::gui::run(&mut c);
+    loop {
+        text_console(&mut c);
     }
 }
