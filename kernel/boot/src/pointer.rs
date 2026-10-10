@@ -292,8 +292,8 @@ impl Pointers {
                 got = true;
                 // Touchpad mouse-mode counts are fine-grained: 1 px per count, doubled past a
                 // small threshold so a swipe crosses the screen (integer acceleration).
-                self.rem_x += accel(dx) * 16;
-                self.rem_y += accel(dy) * 16;
+                self.rem_x = self.rem_x.saturating_add(accel(dx).saturating_mul(16));
+                self.rem_y = self.rem_y.saturating_add(accel(dy).saturating_mul(16));
                 // Same sign convention as the firmware's Simple Pointer (EDK2 passes the HID
                 // wheel value through unchanged).
                 ev.dz += wh;
@@ -349,7 +349,7 @@ impl Pointers {
 
 /// Integer pointer acceleration: slow motion stays 1:1 for precision, fast motion doubles.
 fn accel(d: i32) -> i32 {
-    if d.abs() > 6 {
+    if d.saturating_abs() > 6 {
         d.saturating_mul(2)
     } else {
         d

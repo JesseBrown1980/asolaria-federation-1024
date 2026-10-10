@@ -744,6 +744,11 @@ pub(crate) fn i2c_line2(b: &mut Buf, r: &crate::i2chid::Report) {
         .hex(&r.gpio_padbar.to_be_bytes())
         .s(b" dw0 ")
         .hex(&r.gpio_dw0.to_be_bytes())
+        .s(if r.gpio_saw_low {
+            b" saw-low"
+        } else {
+            b" never-low"
+        })
         .s(if r.gpio_used {
             b" irq-gated"
         } else {

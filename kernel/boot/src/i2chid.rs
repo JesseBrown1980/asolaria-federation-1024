@@ -112,9 +112,8 @@ const SDA_HOLD: u32 = 80;
 /// same table lists (ELAN -> 0x15, 0x01) so a board revision with the other part still works.
 const CANDIDATES: [(u8, u16); 2] = [(0x2C, 0x0020), (0x15, 0x0001)];
 
-/// LPSS I2C controller slots, measured slot first (00:15.1 on this Acer). 00:15.0-3 are I2C0-3
-/// and 00:19.0-1 are I2C4-5 on Skylake..Alder Lake PCHs; 00:19.2 is a UART there, so it is not
-/// listed (the probe resets the LPSS block it tries and must never touch a UART).
+/// LPSS I2C controller slots scanned (counted on screen). 00:15.0-3 are I2C0-3 and 00:19.0-1
+/// I2C4-5 on Skylake..Alder Lake PCHs; 00:19.2 is a UART there and is not listed.
 const SLOTS: [(u8, u8); 6] = [
     (0x15, 1),
     (0x15, 0),
@@ -123,6 +122,12 @@ const SLOTS: [(u8, u8); 6] = [
     (0x19, 0),
     (0x19, 1),
 ];
+
+/// The only controller this driver writes to: (slot, device id), where the ACPI tables put the
+/// touchpad (`\_SB.PCI0.I2C1` = 8086:A369 at 00:15.1 on this Acer, MEASURED). Any other LPSS
+/// controller is counted but never reset and never addressed: sending a register address to an
+/// unknown slave on another bus can be a data write to it (opus55 R1 #3/#4).
+const TOUCHPAD_BUS: (u8, u8, u16) = (0x15, 1, 0xA369);
 
 // ---------------------------------------------------------------- GPIO interrupt line
 
@@ -148,6 +153,12 @@ impl IntLine {
             return (None, padbar);
         }
         let dw0 = comm + padbar as u64 + TP_INT_PAD * 16;
+        let v = rd(dw0, 0);
+        // PMODE (bits 12:10) must be 0 = GPIO and RXDIS (bit 9) clear, or this is not an input
+        // interrupt pad (opus55 R1 #1 falsifier; read-only).
+        if v == u32::MAX || (v >> 10) & 7 != 0 || v & (1 << 9) != 0 {
+            return (None, padbar);
+        }
         (Some(IntLine { dw0 }), padbar)
     }
     /// Raw pad DW0 (bit 1 = RX state).
@@ -208,6 +219,8 @@ pub(crate) struct Report {
     pub gpio_padbar: u32,
     pub gpio_dw0: u32,
     pub gpio_used: bool,
+    /// The interrupt line was seen asserted during the reset response.
+    pub gpio_saw_low: bool,
 }
 
 impl Report {
@@ -231,6 +244,7 @@ impl Report {
             gpio_padbar: 0,
             gpio_dw0: 0,
             gpio_used: false,
+            gpio_saw_low: false,
         }
     }
 }
@@ -281,6 +295,13 @@ impl Dw {
     /// One combined transaction: write `w`, then (repeated start) read `r.len()` bytes, STOP.
     unsafe fn xfer(&self, w: &[u8], r: &mut [u8]) -> Result<(), XErr> {
         let b = self.base;
+        // Discard stale RX bytes from an earlier timed-out transfer so reports never misframe.
+        for _ in 0..256 {
+            if rd(b, IC_RXFLR) == 0 {
+                break;
+            }
+            let _ = rd(b, IC_DATA_CMD);
+        }
         let _ = rd(b, IC_CLR_INTR);
         let total = w.len() + r.len();
         if total == 0 {
@@ -414,8 +435,10 @@ fn parse_mouse(d: &[u8]) -> Option<MouseLayout> {
         let p = d[i];
         if p == 0xFE {
             // Long item: skip.
-            let n = *d.get(i + 1)? as usize;
-            i += 3 + n;
+            let Some(&n) = d.get(i + 1) else {
+                break;
+            };
+            i += 3 + n as usize;
             continue;
         }
         let size = match p & 3 {
@@ -424,7 +447,9 @@ fn parse_mouse(d: &[u8]) -> Option<MouseLayout> {
         };
         let ty = (p >> 2) & 3;
         let tag = p >> 4;
-        let data = d.get(i + 1..i + 1 + size)?;
+        let Some(data) = d.get(i + 1..i + 1 + size) else {
+            break;
+        };
         let (u, s) = item_value(data, size);
         i += 1 + size;
         match (ty, tag) {
@@ -440,9 +465,11 @@ fn parse_mouse(d: &[u8]) -> Option<MouseLayout> {
                         ..MouseLayout::default()
                     });
                     if lay.id == rid {
-                        for k in 0..rcount {
+                        for k in 0..rcount.min(64) {
                             let usage = if has_range {
-                                let v = umin + k;
+                                let Some(v) = umin.checked_add(k) else {
+                                    break;
+                                };
                                 if v > umax {
                                     break;
                                 }
@@ -458,7 +485,7 @@ fn parse_mouse(d: &[u8]) -> Option<MouseLayout> {
                                 (page, usage)
                             };
                             let f = Field {
-                                off: start + (k * rsize) as u16,
+                                off: start.wrapping_add(k.wrapping_mul(rsize) as u16),
                                 size: rsize.min(32) as u8,
                                 signed: lmin < 0,
                                 present: true,
@@ -474,7 +501,7 @@ fn parse_mouse(d: &[u8]) -> Option<MouseLayout> {
                         }
                     }
                 }
-                offs[rid as usize] = start.wrapping_add((rsize * rcount) as u16);
+                offs[rid as usize] = start.wrapping_add(rsize.wrapping_mul(rcount) as u16);
             }
             (0, 0x9) | (0, 0xB) => {
                 // Output / Feature: no input bits.
@@ -583,12 +610,12 @@ const RDESC_MAX: usize = 1024;
 
 pub(crate) struct I2cHid {
     dw: Dw,
+    addr: u8,
     max_in: usize,
     lay: MouseLayout,
     int: Option<IntLine>,
     last: [u8; MAX_IN],
     last_len: usize,
-    repeats: u32,
     left: bool,
     right: bool,
 }
@@ -677,7 +704,11 @@ impl I2cHid {
                 continue;
             }
             rep.controllers += 1;
-            if rep.controllers == 1 {
+            let did = (id >> 16) as u16;
+            if (dev, fun, did) != TOUCHPAD_BUS {
+                continue;
+            }
+            if int.is_none() {
                 // An Intel Serial IO controller exists, so this is an Intel PCH and the sideband
                 // window is decoded; only now read the GPIO community (read-only).
                 let (l, padbar) = IntLine::find();
@@ -719,10 +750,23 @@ impl I2cHid {
     ) -> Option<I2cHid> {
         dw.target(addr);
         let mut desc = [0u8; 30];
-        if let Err(e) = dw.xfer(&reg.to_le_bytes(), &mut desc) {
-            if let XErr::Abort(src) = e {
-                rep.last_abort = src;
+        let mut ok = false;
+        for _ in 0..2 {
+            match dw.xfer(&reg.to_le_bytes(), &mut desc) {
+                Ok(()) => {
+                    ok = true;
+                    break;
+                }
+                Err(e) => {
+                    if let XErr::Abort(src) = e {
+                        rep.last_abort = src;
+                    }
+                    dw.target(addr);
+                    dw.bs.stall(1_000);
+                }
             }
+        }
+        if !ok {
             return None;
         }
         let w = |o: usize| u16::from_le_bytes([desc[o], desc[o + 1]]);
@@ -758,19 +802,22 @@ impl I2cHid {
                 depth: dw.depth,
                 bs: dw.bs,
             },
+            addr,
             max_in,
             lay,
             int,
             last: [0; MAX_IN],
             last_len: 0,
-            repeats: 0,
             left: false,
             right: false,
         };
         // Wait (bounded, 1 s) for the reset acknowledgement, then drain anything queued.
+        let mut saw_low = false;
         for _ in 0..100 {
             dw.bs.stall(10_000);
-            if drv.int.map_or(true, |l| l.pending()) {
+            let p = drv.int.map_or(true, |l| l.pending());
+            saw_low |= drv.int.is_some() && p;
+            if p {
                 let mut b = [0u8; MAX_IN];
                 if dw.xfer(&[], &mut b[..max_in]).is_ok() && b[0] == 0 && b[1] == 0 {
                     break;
@@ -791,17 +838,39 @@ impl I2cHid {
                 dw.bs.stall(1_000);
             }
             rep.gpio_dw0 = l.raw();
-            if !idle {
+            // The device must assert INT for its reset response; a line never seen low proves
+            // nothing (wrong pad reading idle-high would gate every report away forever).
+            if !idle || !saw_low {
                 drv.int = None;
             }
         }
+        rep.gpio_saw_low = saw_low;
         rep.gpio_used = drv.int.is_some();
         rep.stage = Stage::Ready;
         Some(drv)
     }
 
-    /// One report if pending: (dx, dy, wheel, left, right).
+    /// Up to 4 pending reports summed: (dx, dy, wheel, left, right).
     pub(crate) unsafe fn poll(&mut self) -> Option<(i32, i32, i32, bool, bool)> {
+        let mut acc: Option<(i32, i32, i32)> = None;
+        for _ in 0..4 {
+            match self.read_one() {
+                Some((dx, dy, wh)) => {
+                    let a = acc.get_or_insert((0, 0, 0));
+                    a.0 = a.0.saturating_add(dx);
+                    a.1 = a.1.saturating_add(dy);
+                    a.2 = a.2.saturating_add(wh);
+                }
+                None => break,
+            }
+            if self.int.is_none() {
+                break; // blind mode: one read per frame
+            }
+        }
+        acc.map(|(dx, dy, wh)| (dx, dy, wh, self.left, self.right))
+    }
+
+    unsafe fn read_one(&mut self) -> Option<(i32, i32, i32)> {
         if let Some(l) = self.int {
             if !l.pending() {
                 return None;
@@ -809,27 +878,23 @@ impl I2cHid {
         }
         let mut b = [0u8; MAX_IN];
         if self.dw.xfer(&[], &mut b[..self.max_in]).is_err() {
+            // disable + enable flushes both FIFOs, so the next read starts framed.
+            self.dw.target(self.addr);
             return None;
         }
         let len = u16::from_le_bytes([b[0], b[1]]) as usize;
         if len <= 2 || len > self.max_in {
             return None;
         }
-        let body = &b[2..len];
-        // Blind polling only: a byte-identical report repeated many times in a row is the
-        // device re-serving its last report, not new motion.
+        // Blind polling only: a byte-identical repeat is the device re-serving its last report.
         if self.int.is_none() {
             if len == self.last_len && b[..len] == self.last[..len] {
-                self.repeats += 1;
-                if self.repeats > 2 {
-                    return None;
-                }
-            } else {
-                self.repeats = 0;
-                self.last[..len].copy_from_slice(&b[..len]);
-                self.last_len = len;
+                return None;
             }
+            self.last[..len].copy_from_slice(&b[..len]);
+            self.last_len = len;
         }
+        let body = &b[2..len];
         let rep = if self.lay.uses_ids {
             if body.first().copied() != Some(self.lay.id) {
                 return None;
@@ -843,7 +908,7 @@ impl I2cHid {
         let wh = get_bits(rep, self.lay.wheel);
         self.left = get_bits(rep, self.lay.b1) != 0;
         self.right = get_bits(rep, self.lay.b2) != 0;
-        Some((dx, dy, wh, self.left, self.right))
+        Some((dx, dy, wh))
     }
 }
 
@@ -884,6 +949,19 @@ mod tests {
         assert_eq!(get_bits(&r, l.y), 127);
         assert_eq!(get_bits(&r, l.wheel), -1);
         assert_eq!((get_bits(&r, l.b1), get_bits(&r, l.b2)), (0, 1));
+    }
+
+    #[test]
+    fn hostile_descriptors_do_not_panic_or_hang() {
+        // Mouse collection, usage range near u32::MAX, huge report size/count.
+        let d = [
+            0x05, 0x01, 0x09, 0x02, 0xA1, 0x01, 0x05, 0x09, 0x1B, 0xFE, 0xFF, 0xFF, 0xFF, 0x2B,
+            0xFF, 0xFF, 0xFF, 0xFF, 0x77, 0xFF, 0xFF, 0xFF, 0xFF, 0x97, 0xFF, 0xFF, 0xFF, 0xFF,
+            0x81, 0x02, 0x09, 0x30, 0x81, 0x06, 0xC0,
+        ];
+        let _ = parse_mouse(&d);
+        let _ = parse_mouse(&[0xFE]); // long item, truncated
+        let _ = parse_mouse(&[0x05, 0x01, 0x09, 0x02, 0xA1, 0x01, 0x27]); // truncated 4-byte
     }
 
     #[test]
