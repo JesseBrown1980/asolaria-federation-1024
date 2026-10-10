@@ -3,6 +3,7 @@
 
 mod apps;
 mod bootproj;
+mod bridge;
 mod console;
 mod driver_rst_vmd;
 mod font;

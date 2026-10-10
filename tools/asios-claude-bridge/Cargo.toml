@@ -1,0 +1,16 @@
+[package]
+name = "asios-claude-bridge"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# Host side of the ASI OS Claude terminal: VM COM2 (127.0.0.1) <-> the operator's Claude Code
+# harness. std only, no node, no json.
+
+[[bin]]
+name = "asios-claude-bridge"
+path = "src/main.rs"
+
+[dependencies]

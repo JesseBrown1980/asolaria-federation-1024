@@ -7,6 +7,7 @@
 //! E=0: the desktop starts nothing; every action is a click or a keystroke by the operator.
 
 use crate::apps::{self, App, Buf, Term, View, APPS};
+use crate::bridge::{Bridge, Msg, State as BridgeState};
 use crate::console::{self, Action, Ctx, Sink, Tone};
 use crate::gfx::{mix, rgb, text_w, Canvas, Rect, Screen, CURSOR_H, CURSOR_W};
 use crate::pointer::Pointers;
@@ -49,8 +50,8 @@ struct Gop {
 
 const TB: i32 = 44; // taskbar height
 const TITLE: i32 = 32; // window title-bar height
-const NAPP: usize = 7;
-const MENU_N: usize = 10; // 7 apps + text console + restart + power off
+const NAPP: usize = 8;
+const MENU_N: usize = 11; // 8 apps + text console + restart + power off
 const COLS: usize = 96;
 const ROWS: usize = 400;
 
@@ -100,6 +101,10 @@ struct Desk<'a, 'b> {
     last_click: (u64, usize),
     hover: Hit,
     term: Term,
+    /// The Claude terminal (Opus 5.5 through the host bridge on COM2).
+    cterm: Term,
+    bridge: Bridge,
+    claude_busy: bool,
     last_cmd: [u8; 72],
     last_len: usize,
     tpms: u64,
@@ -159,6 +164,13 @@ pub(crate) unsafe fn run(c: &mut Ctx) {
         .alloc_slice::<u32>((w * h) as usize, 0)
         .map(|px| Canvas::new(px, w, h));
     let (Some(cells), Some(tones)) = (
+        bs.alloc_slice::<u8>(COLS * ROWS, b' '),
+        bs.alloc_slice::<u8>(COLS * ROWS, 0),
+    ) else {
+        crate::serial_print(b"  GUI|op=unavailable|why=no_memory|json=0\r\n");
+        return;
+    };
+    let (Some(ccells), Some(ctones)) = (
         bs.alloc_slice::<u8>(COLS * ROWS, b' '),
         bs.alloc_slice::<u8>(COLS * ROWS, 0),
     ) else {
@@ -230,6 +242,10 @@ pub(crate) unsafe fn run(c: &mut Ctx) {
         last_click: (0, usize::MAX),
         hover: Hit::None,
         term: Term::new(cells, tones, COLS),
+        cterm: Term::new(ccells, ctones, COLS),
+        // SAFETY: COM2 port I/O, only under a hypervisor (see bridge.rs).
+        bridge: unsafe { Bridge::open() },
+        claude_busy: false,
         last_cmd: [0; 72],
         last_len: 0,
         tpms,
@@ -252,7 +268,10 @@ pub(crate) unsafe fn run(c: &mut Ctx) {
         draw_wallpaper(wl);
     }
     d.welcome();
+    d.claude_welcome();
     d.open(App::Console);
+    // The Claude terminal always starts, on top and focused.
+    d.open(App::Claude);
     d.dirty = d.cv.bounds();
     d.event_loop();
 }
@@ -451,6 +470,108 @@ impl Desk<'_, '_> {
             .raw(b"\r\n");
         // SAFETY: COM1 port I/O.
         unsafe { crate::serial_print(b.get()) };
+    }
+
+    fn claude_welcome(&mut self) {
+        let t = &mut self.cterm;
+        t.tone(Tone::Accent);
+        t.put(b"CLAUDE  .  Opus 5.5  .  seat ACER-CLAUDE-FABLE5\n");
+        t.tone(Tone::Normal);
+        t.put(b"Type a question and press Enter. It goes over COM2 to the host bridge, which\n");
+        t.put(b"answers through the operator's own Claude Code harness (signed in, Asolaria\n");
+        t.put(b"MCPs, FABLE5 office). No credential lives in this kernel.\n\n");
+        t.tone(Tone::Warn);
+        t.put(b"  bridge: ");
+        t.put(self.bridge.state.text());
+        t.put(b"\n\n");
+        t.tone(Tone::Normal);
+        let mut b = Buf::new();
+        b.s(b"  GUI|op=claude_bridge|state=")
+            .s(self.bridge.state.text())
+            .s(b"|json=0")
+            .raw(b"\r\n");
+        // SAFETY: COM1 port I/O.
+        unsafe { crate::serial_print(b.get()) };
+    }
+
+    fn claude_submit(&mut self) {
+        let n = self.cterm.ilen;
+        let mut q = [0u8; 72];
+        q[..n].copy_from_slice(&self.cterm.input[..n]);
+        self.cterm.ilen = 0;
+        if n == 0 {
+            return;
+        }
+        self.cterm.tone(Tone::Warn);
+        self.cterm.put(b"opus> ");
+        self.cterm.tone(Tone::Normal);
+        self.cterm.put(&q[..n]);
+        self.cterm.put(b"\n");
+        if !self.bridge.live() {
+            self.cterm.tone(Tone::Error);
+            self.cterm.put(b"  ");
+            self.cterm.put(self.bridge.state.text());
+            self.cterm.put(b"\n");
+            self.cterm.tone(Tone::Normal);
+        } else if self.claude_busy {
+            self.cterm.tone(Tone::Warn);
+            self.cterm.put(b"  still answering the last question\n");
+            self.cterm.tone(Tone::Normal);
+        } else {
+            // SAFETY: COM2 port I/O (bridge is live only under a hypervisor with a UART).
+            unsafe { self.bridge.ask(&q[..n]) };
+            self.claude_busy = true;
+        }
+        let r = self.wins[App::Claude.idx()].r;
+        self.mark(Self::win_area(r));
+    }
+
+    /// Move host-bridge lines into the Claude terminal (bounded per frame).
+    fn claude_pump(&mut self) {
+        let mut changed = false;
+        for _ in 0..32 {
+            // SAFETY: COM2 port I/O (no-op unless the bridge is live).
+            let Some(m) = (unsafe { self.bridge.poll() }) else {
+                break;
+            };
+            changed = true;
+            match m {
+                Msg::Hello(who) => {
+                    self.cterm.tone(Tone::Accent);
+                    self.cterm.put(b"  connected: ");
+                    self.cterm.put(who);
+                    self.cterm.put(b"\n");
+                    self.cterm.tone(Tone::Normal);
+                }
+                Msg::Out(s) => {
+                    self.cterm.put(s);
+                    self.cterm.put(b"\n");
+                }
+                Msg::End(s) => {
+                    self.claude_busy = false;
+                    self.cterm.tone(Tone::Accent);
+                    self.cterm.put(b"  -- ");
+                    self.cterm.put(s);
+                    self.cterm.put(b"\n\n");
+                    self.cterm.tone(Tone::Normal);
+                }
+                Msg::Busy(s) => {
+                    self.claude_busy = false;
+                    self.cterm.tone(Tone::Warn);
+                    self.cterm.put(b"  busy: ");
+                    self.cterm.put(s);
+                    self.cterm.put(b"\n");
+                    self.cterm.tone(Tone::Normal);
+                }
+                Msg::Other => {}
+            }
+        }
+        if changed {
+            let w = self.wins[App::Claude.idx()];
+            if w.open && !w.min {
+                self.mark(Self::win_area(w.r));
+            }
+        }
     }
 
     fn welcome(&mut self) {
@@ -700,9 +821,9 @@ impl Desk<'_, '_> {
         self.menu = false;
         self.mark_all();
         match i {
-            0..=6 => self.open(APPS[i]),
-            7 => self.text_mode(),
-            8 => {
+            0..=7 => self.open(APPS[i]),
+            8 => self.text_mode(),
+            9 => {
                 self.open(App::Power);
                 self.confirm = Some((0, self.now_ms()));
             }
@@ -791,6 +912,9 @@ impl Desk<'_, '_> {
         if a == App::Console.idx() {
             let max = self.term.used.saturating_sub(2) as i32;
             self.term.scroll = (self.term.scroll as i32 + delta).clamp(0, max) as usize;
+        } else if a == App::Claude.idx() {
+            let max = self.cterm.used.saturating_sub(2) as i32;
+            self.cterm.scroll = (self.cterm.scroll as i32 + delta).clamp(0, max) as usize;
         } else if a == App::Devices.idx() {
             let n = self.c.facts.pci_devices as i32;
             self.wins[a].scroll = (self.wins[a].scroll - delta).clamp(0, (n - 1).max(0));
@@ -946,6 +1070,9 @@ impl Desk<'_, '_> {
                 if a == App::Console.idx() {
                     self.term.ilen = 0;
                     self.mark(Self::win_area(self.wins[a].r));
+                } else if a == App::Claude.idx() {
+                    self.cterm.ilen = 0;
+                    self.mark(Self::win_area(self.wins[a].r));
                 } else {
                     self.close(a);
                 }
@@ -1045,6 +1172,26 @@ impl Desk<'_, '_> {
                 }
                 self.caret = true;
                 self.term.scroll = 0;
+                let r = self.wins[a].r;
+                self.mark(Self::win_area(r));
+            }
+            App::Claude => {
+                match (sc, ch) {
+                    (0x09, _) => return self.scroll(a, 8),
+                    (0x0A, _) => return self.scroll(a, -8),
+                    (_, 0x0D) => return self.claude_submit(),
+                    (_, 0x08) => self.cterm.ilen = self.cterm.ilen.saturating_sub(1),
+                    (_, c)
+                        if (0x20..0x7F).contains(&c)
+                            && self.cterm.ilen < self.cterm.input.len() =>
+                    {
+                        self.cterm.input[self.cterm.ilen] = c as u8;
+                        self.cterm.ilen += 1;
+                    }
+                    _ => return,
+                }
+                self.caret = true;
+                self.cterm.scroll = 0;
                 let r = self.wins[a].r;
                 self.mark(Self::win_area(r));
             }
@@ -1207,6 +1354,9 @@ impl Desk<'_, '_> {
             ptr_splitter: self.ptr.via_splitter,
             usb_connected: self.ptr.connected_usb,
             ptr_note: note,
+            bridge_note: self.bridge.state.text(),
+            bridge_ok: self.bridge.state == BridgeState::Connected,
+            claude_busy: self.claude_busy,
             i2c: self.ptr.i2c_report,
             kbd_pointer: self.kptr,
             mem: self.mem,
@@ -1219,7 +1369,7 @@ impl Desk<'_, '_> {
             focused,
             power_confirm: self.confirm.map(|c| c.0),
         };
-        apps::draw_body(cv, app, body, &v, &self.term, w.scroll);
+        apps::draw_body(cv, app, body, &v, (&self.term, &self.cterm), w.scroll);
         cv.restore_clip(old);
     }
 
@@ -1340,6 +1490,7 @@ impl Desk<'_, '_> {
             b"Power",
             b"About",
             b"Help  (F1)",
+            b"Claude  (Opus 5.5)",
             b"Text console",
             b"Restart...",
             b"Power off...",
@@ -1387,6 +1538,7 @@ impl Desk<'_, '_> {
 
     fn event_loop(&mut self) {
         loop {
+            self.claude_pump();
             // Keyboard: drain what is waiting (bounded per frame).
             for _ in 0..16 {
                 // SAFETY: firmware ConIn.
@@ -1437,9 +1589,11 @@ impl Desk<'_, '_> {
             if now.wrapping_sub(self.last_blink) >= 530 {
                 self.last_blink = now;
                 self.caret = !self.caret;
-                let w = self.wins[App::Console.idx()];
-                if w.open && !w.min && self.focused() == Some(App::Console.idx()) {
-                    self.mark(Self::body(w.r));
+                for app in [App::Console, App::Claude] {
+                    let w = self.wins[app.idx()];
+                    if w.open && !w.min && self.focused() == Some(app.idx()) {
+                        self.mark(Self::body(w.r));
+                    }
                 }
             }
             if let Some((_, t)) = self.confirm {
