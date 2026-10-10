@@ -41,12 +41,17 @@ const LINE_LIMIT: u64 = 4096;
 
 static UUID_SEQ: AtomicU64 = AtomicU64::new(0);
 
+/// Environment variables that would make `claude` bill an API key instead of the login.
+const AUTH_OVERRIDES: [&str; 2] = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"];
+
 struct Cfg {
     model: String,
     claude: String,
     journal: String,
     cwd: String,
     vm: Vec<String>,
+    /// `--use-api-key`: keep ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN for the child.
+    api_key: bool,
 }
 
 fn cfg() -> Cfg {
@@ -56,12 +61,18 @@ fn cfg() -> Cfg {
         journal: DEFAULT_JOURNAL.into(),
         cwd: std::env::var("USERPROFILE").unwrap_or_else(|_| ".".into()),
         vm: DEFAULT_VM.iter().map(|s| s.to_string()).collect(),
+        api_key: false,
     };
     let a: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
     while i < a.len() {
         match a[i].as_str() {
             // Everything after --vm is the VM command line (e.g. `--vm wsl.exe -e sh x.sh run none`).
+            "--use-api-key" => {
+                c.api_key = true;
+                i += 1;
+                continue;
+            }
             "--vm" => {
                 c.vm = a[i + 1..].to_vec();
                 break;
@@ -277,6 +288,14 @@ fn answer<W: Write>(c: &Cfg, sess: &mut Session, q: &str, out: &mut W) -> std::i
     } else {
         cmd.arg("--session-id").arg(&sess.id);
     }
+    // Use the operator's signed-in claude.ai login, never an API key that happens to be in the
+    // environment: a user-level ANTHROPIC_API_KEY took precedence and every answer came back
+    // "Credit balance is too low" (MEASURED 2026-10-10; without it the same call answered rc=0).
+    if !c.api_key {
+        for v in AUTH_OVERRIDES {
+            cmd.env_remove(v);
+        }
+    }
     cmd.current_dir(&c.cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -363,7 +382,12 @@ fn answer<W: Write>(c: &Cfg, sess: &mut Session, q: &str, out: &mut W) -> std::i
     };
     let err = erx.recv_timeout(Duration::from_secs(1)).unwrap_or_default();
     if rc != 0 {
-        for l in err.lines().take(6) {
+        // The LAST stderr lines carry the failure; the first ones are often settings warnings.
+        let lines: Vec<&str> = err
+            .lines()
+            .filter(|l| !l.contains("Permission allow rule"))
+            .collect();
+        for l in &lines[lines.len().saturating_sub(6)..] {
             send(out, "OUT", &format!("stderr: {l}"))?;
         }
         // F4: a failed FIRST call may have created the session; start a fresh id next time.
@@ -529,6 +553,7 @@ mod tests {
                 .into_owned(),
             cwd: ".".into(),
             vm: vec![],
+            api_key: false,
         };
         let mut sess = Session {
             id: session_uuid(),

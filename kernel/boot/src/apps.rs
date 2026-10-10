@@ -96,7 +96,7 @@ impl App {
             App::Power => (540, 250),
             App::About => (700, 330),
             App::Help => (740, 440),
-            App::Claude => (780, 460),
+            App::Claude => (820, 470),
         }
     }
 }
@@ -164,6 +164,8 @@ impl Buf {
 }
 
 // ------------------------------------------------------------------ terminal model
+/// Longest command / question line the terminals accept.
+pub(crate) const INPUT_MAX: usize = 120;
 /// The Console window's text grid (scrollback ring of `rows` x `cols`), a [`Sink`].
 pub(crate) struct Term {
     cells: &'static mut [u8],
@@ -174,7 +176,7 @@ pub(crate) struct Term {
     pub used: usize,
     col: usize,
     tone: u8,
-    pub input: [u8; 72],
+    pub input: [u8; INPUT_MAX],
     pub ilen: usize,
     pub scroll: usize,
 }
@@ -190,7 +192,7 @@ impl Term {
             used: 1,
             col: 0,
             tone: 0,
-            input: [0; 72],
+            input: [0; INPUT_MAX],
             ilen: 0,
             scroll: 0,
         }
@@ -744,58 +746,57 @@ pub(crate) fn pointer_line(b: &mut Buf, v: &View) {
     }
 }
 
-/// "Touchpad  I2C-HID ready  ctl 0:15.1 8086:a369 bar .. comp .. D3->D0" (probe outcome).
-pub(crate) fn i2c_line1(b: &mut Buf, r: &crate::i2chid::Report) {
-    b.s(b"Touchpad   I2C-HID ")
-        .s(r.stage.text())
-        .s(b"  controllers ")
-        .dec(r.controllers as u64);
-    if r.controllers > 0 {
-        b.s(b"  last 0:")
-            .hex(&[r.dev])
-            .s(b".")
-            .dec(r.fun as u64)
-            .s(b" 8086:")
-            .hex16(r.did)
-            .s(b"  bar ")
-            .hex(&r.bar.to_be_bytes())
-            .s(b"  comp ")
-            .hex(&r.comp_type.to_be_bytes())
-            .s(b"  was D")
-            .dec(r.pm_was as u64);
-    }
-}
+/// Lines of the touchpad probe report (each <= ~76 columns so it fits the Devices window).
+pub(crate) const I2C_LINES: usize = 3;
 
-/// "  addr 2c  hid 06cb:7db5  rdesc 693  max_in 30  mouse id 2  gpio ..." (device side).
-pub(crate) fn i2c_line2(b: &mut Buf, r: &crate::i2chid::Report) {
-    b.s(b"           addr ")
-        .hex(&[r.addr])
-        .s(b"  hid ")
-        .hex16(r.vid)
-        .s(b":")
-        .hex16(r.pid)
-        .s(b"  rdesc ")
-        .dec(r.rdesc_len as u64)
-        .s(b"  max_in ")
-        .dec(r.max_in as u64)
-        .s(b"  mouse_id ")
-        .dec(r.mouse_id as u64)
-        .s(b"  abort ")
-        .hex(&r.last_abort.to_be_bytes())
-        .s(b"  gpio padbar ")
-        .hex(&r.gpio_padbar.to_be_bytes())
-        .s(b" dw0 ")
-        .hex(&r.gpio_dw0.to_be_bytes())
-        .s(if r.gpio_saw_low {
-            b" saw-low"
-        } else {
-            b" never-low"
-        })
-        .s(if r.gpio_used {
-            b" irq-gated"
-        } else {
-            b" blind-poll"
-        });
+/// Line `k` of the touchpad probe report: 0 = stage + controller, 1 = device, 2 = interrupt line.
+pub(crate) fn i2c_line(b: &mut Buf, r: &crate::i2chid::Report, k: usize) {
+    match k {
+        0 => {
+            b.s(b"Touchpad   I2C-HID ")
+                .s(r.stage.text())
+                .s(b"  controllers ")
+                .dec(r.controllers as u64);
+            if r.controllers > 0 {
+                b.s(b"  0:")
+                    .hex(&[r.dev])
+                    .s(b".")
+                    .dec(r.fun as u64)
+                    .s(b" 8086:")
+                    .hex16(r.did)
+                    .s(b"  was D")
+                    .dec(r.pm_was as u64);
+            }
+        }
+        1 => {
+            b.s(b"           bar ")
+                .hex(&r.bar.to_be_bytes())
+                .s(b"  comp ")
+                .hex(&r.comp_type.to_be_bytes())
+                .s(b"  addr ")
+                .hex(&[r.addr])
+                .s(b"  hid ")
+                .hex16(r.vid)
+                .s(b":")
+                .hex16(r.pid);
+        }
+        _ => {
+            b.s(b"           rdesc ")
+                .dec(r.rdesc_len as u64)
+                .s(b" max_in ")
+                .dec(r.max_in as u64)
+                .s(b" id ")
+                .dec(r.mouse_id as u64)
+                .s(b" abort ")
+                .hex(&r.last_abort.to_be_bytes())
+                .s(b" gpio ")
+                .hex(&r.gpio_padbar.to_be_bytes()[2..])
+                .s(b"/")
+                .hex(&r.gpio_dw0.to_be_bytes())
+                .s(if r.gpio_saw_low { b" low" } else { b" nolow" })
+                .s(if r.gpio_used { b" irq" } else { b" poll" });
+        }
+    }
 }
 
 pub(crate) fn hms(b: &mut Buf, s: u64) {
@@ -876,7 +877,10 @@ fn draw_console(
     let iy = body.y + body.h - lh - 6;
     cv.fill(Rect::new(body.x, iy - 4, body.w, 1), rgb(0x16, 0x22, 0x38));
     let px = cv.text(x, iy, prompt, AMBER, 1);
-    let ex = cv.text(px, iy, &t.input[..t.ilen], WHITE, 1);
+    // Long input scrolls horizontally: always show the end of what is being typed.
+    let room = (((body.w - 20) / 8) as usize).saturating_sub(prompt.len() + 2);
+    let from = t.ilen.saturating_sub(room);
+    let ex = cv.text(px, iy, &t.input[from..t.ilen], WHITE, 1);
     if v.caret && v.focused {
         cv.fill(Rect::new(ex + 1, iy + 2, 7, 13), CYAN);
     }
@@ -927,14 +931,12 @@ fn draw_devices(cv: &mut Canvas, body: Rect, v: &View, scroll: i32) {
     if let Some(r) = v.i2c {
         let ok = r.stage == crate::i2chid::Stage::Ready;
         let c = if ok { GREEN } else { AMBER };
-        b = Buf::new();
-        i2c_line1(&mut b, &r);
-        cv.text(x, y, b.get(), c, 1);
-        y += lh;
-        b = Buf::new();
-        i2c_line2(&mut b, &r);
-        cv.text(x, y, b.get(), c, 1);
-        y += lh;
+        for k in 0..I2C_LINES {
+            b = Buf::new();
+            i2c_line(&mut b, &r, k);
+            cv.text(x, y, b.get(), c, 1);
+            y += lh;
+        }
     }
     let st: &[u8] = if v.facts.rst_vmd {
         b"Storage    Intel RST/VMD 8086:282A gate MATCHED (scaffold: VMD walk is the next step)"

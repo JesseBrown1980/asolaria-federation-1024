@@ -105,7 +105,7 @@ struct Desk<'a, 'b> {
     cterm: Term,
     bridge: Bridge,
     claude_busy: bool,
-    last_cmd: [u8; 72],
+    last_cmd: [u8; apps::INPUT_MAX],
     last_len: usize,
     tpms: u64,
     t0: u64,
@@ -246,7 +246,7 @@ pub(crate) unsafe fn run(c: &mut Ctx) {
         // SAFETY: COM3 port I/O, only under a hypervisor (see bridge.rs).
         bridge: unsafe { Bridge::open() },
         claude_busy: false,
-        last_cmd: [0; 72],
+        last_cmd: [0; apps::INPUT_MAX],
         last_len: 0,
         tpms,
         t0: rtc::rdtsc(),
@@ -415,14 +415,10 @@ impl Desk<'_, '_> {
         // SAFETY: COM1 port I/O.
         unsafe { crate::serial_print(b.get()) };
         if let Some(r) = self.ptr.i2c_report {
-            for k in 0..2 {
+            for k in 0..apps::I2C_LINES {
                 let mut b = Buf::new();
                 b.s(b"  GUI|op=i2c_hid|");
-                if k == 0 {
-                    crate::apps::i2c_line1(&mut b, &r);
-                } else {
-                    crate::apps::i2c_line2(&mut b, &r);
-                }
+                apps::i2c_line(&mut b, &r, k);
                 b.s(b"|json=0").raw(b"\r\n");
                 // SAFETY: COM1 port I/O.
                 unsafe { crate::serial_print(b.get()) };
@@ -496,7 +492,7 @@ impl Desk<'_, '_> {
 
     fn claude_submit(&mut self) {
         let n = self.cterm.ilen;
-        let mut q = [0u8; 72];
+        let mut q = [0u8; apps::INPUT_MAX];
         q[..n].copy_from_slice(&self.cterm.input[..n]);
         self.cterm.ilen = 0;
         if n == 0 {
@@ -884,7 +880,7 @@ impl Desk<'_, '_> {
     }
 
     fn run_command(&mut self) {
-        let mut cmd = [0u8; 72];
+        let mut cmd = [0u8; apps::INPUT_MAX];
         let n = self.term.ilen;
         cmd[..n].copy_from_slice(&self.term.input[..n]);
         self.term.ilen = 0;
