@@ -400,11 +400,13 @@ mod tests {
 
     #[test]
     fn canonical_syscall_count_is_exactly_16() {
+        let _g = crate::test_sync::serial();
         assert_eq!(CANONICAL_SYSCALLS.len(), 16);
     }
 
     #[test]
     fn unwired_stubs_still_return_unimplemented() {
+        let _g = crate::test_sync::serial();
         // Per Phase-3 doctrine, every syscall has an explicit body (FULL wire / HALF wire /
         // doc-only / diverging spin-loop). This test enumerates the syscalls still returning
         // Unimplemented for VALID inputs (half-wires return Unimplemented for valid; their
@@ -426,6 +428,7 @@ mod tests {
 
     #[test]
     fn sys_read_stdin_returns_eof_v0_3_2() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.3.2: FULL WIRE — fd 0 (stdin) returns Ok(0) (no input source v0.1).
         let mut buf = [0u8; 16];
         assert_eq!(sys_read(0, &mut buf, 8), Ok(0));
@@ -433,6 +436,7 @@ mod tests {
 
     #[test]
     fn sys_read_invalid_fd_returns_invalid() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.3.2: FULL WIRE — fds outside reserved range return Invalid.
         let mut buf = [0u8; 16];
         assert_eq!(sys_read(99, &mut buf, 8), Err(SyscallErr::Invalid));
@@ -442,6 +446,7 @@ mod tests {
 
     #[test]
     fn sys_write_stdout_returns_buf_len_v0_3_2() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.3.2: FULL WIRE — fd 1 (stdout) accepts; returns buf.len().
         assert_eq!(sys_write(1, b"hello"), Ok(5));
         assert_eq!(sys_write(2, b"err msg"), Ok(7)); // stderr
@@ -449,6 +454,7 @@ mod tests {
 
     #[test]
     fn sys_write_invalid_fd_returns_invalid() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.3.2: FULL WIRE — fds outside reserved range OR stdin return Invalid.
         assert_eq!(sys_write(0, b"x"), Err(SyscallErr::Invalid)); // stdin
         assert_eq!(sys_write(99, b"x"), Err(SyscallErr::Invalid));
@@ -456,6 +462,7 @@ mod tests {
 
     #[test]
     fn sys_pid_current_returns_federation_anchor_fingerprint() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.1.4: sys_pid_current wired to FEDERATION_ANCHOR_PID sha256 first-8-bytes BE.
         // Expected u64 = 0xe00b1a465d6dcb50 (matches cross-runtime triple-parity verdict :82272).
         assert_eq!(sys_pid_current(), Ok(0xe00b_1a46_5d6d_cb50));
@@ -463,6 +470,7 @@ mod tests {
 
     #[test]
     fn sys_munmap_rejects_null_pointer() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.1.7: input-validation half-wire.
         assert_eq!(
             sys_munmap(core::ptr::null_mut(), 4096),
@@ -472,6 +480,7 @@ mod tests {
 
     #[test]
     fn sys_munmap_rejects_zero_length() {
+        let _g = crate::test_sync::serial();
         let mut byte: u8 = 0;
         assert_eq!(
             sys_munmap(&mut byte as *mut u8, 0),
@@ -481,6 +490,7 @@ mod tests {
 
     #[test]
     fn sys_munmap_releases_allocated_page_v0_3_1() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.3.1: FULL WIRE — alloc a real virtual page via sys_mmap,
         // then release it via sys_munmap. v0.1 free is a no-op on success so
         // releasing the same page twice ALSO succeeds (bitmap reclaim lands v0.2).
@@ -495,6 +505,7 @@ mod tests {
 
     #[test]
     fn sys_munmap_out_of_range_pointer_returns_invalid() {
+        let _g = crate::test_sync::serial();
         // A stack-resident byte is non-null + non-zero-len but outside the synthetic
         // virtual range. Frame allocator maps InvalidPointer → SyscallErr::Invalid.
         let mut byte: u8 = 0;
@@ -506,6 +517,7 @@ mod tests {
 
     #[test]
     fn sys_exec_rejects_undersized_envelope() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.1.8: minimal envelope shell ≥ 32 bytes.
         assert_eq!(sys_exec(b"too short"), Err(SyscallErr::Invalid));
         assert_eq!(sys_exec(&[]), Err(SyscallErr::Invalid));
@@ -513,6 +525,7 @@ mod tests {
 
     #[test]
     fn sys_exec_dispatches_valid_envelope_and_returns_monotonic_handle() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.3.0: FULL WIRE — a valid (≥ 32 byte) envelope must enqueue
         // and return Ok(handle). Handle ≥ 1 (0 reserved as "no handle") and
         // strictly increases across consecutive successful calls.
@@ -530,6 +543,7 @@ mod tests {
 
     #[test]
     fn sys_read_rejects_len_greater_than_buf_len() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.1.9: signature soundness — len > buf.len() would overrun.
         let mut buf = [0u8; 8];
         assert_eq!(sys_read(0, &mut buf, 9), Err(SyscallErr::Invalid));
@@ -538,6 +552,7 @@ mod tests {
 
     #[test]
     fn sys_read_stdin_returns_ok_zero_v0_3_2() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.3.2: FULL WIRE — sys_read on STDIN_FD (0) returns Ok(0) (EOF).
         // No source plumbed in v0.1; vfs::vfs_read backs this.
         let mut buf = [0u8; 8];
@@ -547,12 +562,14 @@ mod tests {
 
     #[test]
     fn sys_write_rejects_empty_buf() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.1.10: zero-byte write is meaningless.
         assert_eq!(sys_write(0, &[]), Err(SyscallErr::Invalid));
     }
 
     #[test]
     fn sys_write_to_stdin_returns_invalid_v0_3_2() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.3.2: FULL WIRE — sys_write on STDIN_FD (0) returns Invalid
         // (can't write to stdin). vfs::vfs_write returns InvalidOpForFd, mapped to Invalid.
         let buf = [1u8, 2, 3];
@@ -561,18 +578,21 @@ mod tests {
 
     #[test]
     fn sys_mmap_rejects_zero_length() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.1.11: zero-byte mapping is meaningless.
         assert_eq!(sys_mmap(0, 0x3), Err(SyscallErr::Invalid));
     }
 
     #[test]
     fn sys_mmap_rejects_zero_prot() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.1.11: prot == 0 requests no access bits — no-op trap.
         assert_eq!(sys_mmap(4096, 0), Err(SyscallErr::Invalid));
     }
 
     #[test]
     fn sys_mmap_allocates_non_null_page_aligned_pointer_v0_3_1() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.3.1: FULL WIRE — valid (len > 0, prot > 0) inputs return a
         // non-null, page-aligned, in-range virtual pointer from the frame allocator.
         crate::frame_alloc::reset_for_tests();
@@ -595,6 +615,7 @@ mod tests {
 
     #[test]
     fn sys_envelope_send_rejects_undersized_envelope() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.1.12: same MIN_ENVELOPE_BYTES (32) as sys_exec.
         assert_eq!(sys_envelope_send(b"too short", 0), Err(SyscallErr::Invalid));
         assert_eq!(sys_envelope_send(&[], 0), Err(SyscallErr::Invalid));
@@ -602,6 +623,7 @@ mod tests {
 
     #[test]
     fn sys_envelope_send_dispatches_to_envelope_module() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.2.1: FULL WIRE — a valid (≥ 32 byte) envelope must enqueue
         // successfully and return Ok(()). Reset the slot first so the test is
         // order-independent w.r.t. other envelope tests.
@@ -616,6 +638,7 @@ mod tests {
 
     #[test]
     fn sys_envelope_recv_rejects_empty_buf() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.1.13: nowhere to write the received envelope.
         let mut empty: [u8; 0] = [];
         assert_eq!(sys_envelope_recv(&mut empty, 0), Err(SyscallErr::Invalid));
@@ -623,6 +646,7 @@ mod tests {
 
     #[test]
     fn sys_envelope_recv_returns_data_or_would_block() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.2.2: FULL WIRE — when the queue is empty, recv returns
         // WouldBlock (mapped from EnvelopeErr::QueueEmpty). When data is enqueued,
         // recv returns Ok(bytes_read) with the exact byte length the sender pushed.
@@ -644,6 +668,7 @@ mod tests {
 
     #[test]
     fn sys_cosign_append_rejects_undersized_row() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.1.14: minimal cosign row needs hash-digest prefix (≥ 16 bytes).
         let short = [0u8; 8];
         assert_eq!(sys_cosign_append(&short), Err(SyscallErr::Invalid));
@@ -652,6 +677,7 @@ mod tests {
 
     #[test]
     fn sys_cosign_append_returns_sequence_number_for_valid_row() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.2.3: FULL WIRE — valid (≥ 16 byte) rows succeed and return a
         // monotonic sequence number ≥ 1 (1-indexed chain length).
         // NOTE: parallel-test-safe — APPEND_SEQ_COUNTER is module-global, so we assert
@@ -668,6 +694,7 @@ mod tests {
 
     #[test]
     fn sys_cosign_append_increments_sequence_across_appends() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.2.3: FULL WIRE — successive appends must return strictly
         // increasing sequence numbers (monotonic chain length). Parallel-test-safe:
         // asserts relative monotonicity between three back-to-back appends in this
@@ -684,6 +711,7 @@ mod tests {
 
     #[test]
     fn sys_fork_returns_child_handle() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.2.4: FULL WIRE — sys_fork mints a fresh child handle (≥ 1) via
         // agent_runtime::spawn_child_agent. The exact value depends on counter state at
         // call-time (tests can run in any order), but it must be a positive Handle.
@@ -701,6 +729,7 @@ mod tests {
 
     #[test]
     fn sys_fork_increments_registry() {
+        let _g = crate::test_sync::serial();
         // Phase-3 v0.2.4: each successful sys_fork bumps the agent_runtime child counter.
         let before = crate::agent_runtime::spawn_child_agent_count();
         let res = sys_fork();

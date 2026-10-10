@@ -139,7 +139,11 @@ fn json_unit_q_field(text: &str, key: &str) -> Option<u32> {
     if neg {
         return Some(0);
     }
-    let int_val: u32 = if int_part.is_empty() { 0 } else { int_part.parse().ok()? };
+    let int_val: u32 = if int_part.is_empty() {
+        0
+    } else {
+        int_part.parse().ok()?
+    };
     if int_val >= 1 {
         return Some(1000);
     }
@@ -265,7 +269,8 @@ fn load_100b_registry_stats(registry_dir: &str, chunk_limit: Option<u128>) -> Re
     if weight_total > 0 {
         // one integer divide with round-half-up, applied once at the end
         stats.weighted_score_q = ((score_weight * 2 + weight_total) / (weight_total * 2)) as u32;
-        stats.weighted_reverse_gain_q = ((rg_weight * 2 + weight_total) / (weight_total * 2)) as u32;
+        stats.weighted_reverse_gain_q =
+            ((rg_weight * 2 + weight_total) / (weight_total * 2)) as u32;
     }
     stats.loaded = stats.chunks_loaded > 0;
     stats
@@ -513,8 +518,8 @@ mod tests {
 
     #[test]
     fn reverse_gain_to_reverse_risk_mapping_matches_omniflywheel_gate() {
-        assert_eq!(reverse_risk_q_from_reverse_gain_q(0.775), 225);
-        assert_eq!(reverse_risk_q_from_reverse_gain_q(0.720), 280);
-        assert_eq!(reverse_risk_q_from_reverse_gain_q(0.719), 281);
+        assert_eq!(reverse_risk_q_from_reverse_gain_q(775), 225);
+        assert_eq!(reverse_risk_q_from_reverse_gain_q(720), 280);
+        assert_eq!(reverse_risk_q_from_reverse_gain_q(719), 281);
     }
 }

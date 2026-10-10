@@ -215,7 +215,8 @@ mod tests {
     /// which is why the on-disk CRLF source equals the LF runtime payload.
     #[test]
     fn parity_against_node_hook_source_if_present() {
-        let path = "C:/tmp/hookwall-handlers/session-start.mjs";
+        // The hook settings.json actually runs (C:/tmp/hookwall-handlers is a stale copy).
+        let path = "C:/Users/acer/.claude/hooks/session-start.mjs";
         let Ok(src) = std::fs::read_to_string(path) else {
             return;
         };

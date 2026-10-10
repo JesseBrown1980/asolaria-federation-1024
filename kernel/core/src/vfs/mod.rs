@@ -324,6 +324,8 @@ pub fn vfs_write(fd: u64, buf: &[u8]) -> Result<usize, VfsErr> {
 mod tests {
     use super::*;
 
+    use crate::test_sync::serial;
+
     // ===== v0.1 tests (preserved verbatim) =====
 
     #[test]
@@ -410,6 +412,7 @@ mod tests {
     #[test]
     fn vfs_v02_reserved_fds_are_always_open() {
         // Stdin/stdout/stderr are special-cased — always Open regardless of table state.
+        let _g = serial();
         reset_for_tests();
         assert!(vfs_is_open(STDIN_FD));
         assert!(vfs_is_open(STDOUT_FD));
@@ -418,6 +421,7 @@ mod tests {
 
     #[test]
     fn vfs_v02_is_open_rejects_out_of_range() {
+        let _g = serial();
         reset_for_tests();
         assert!(!vfs_is_open(FD_TABLE_SIZE as u64));
         assert!(!vfs_is_open(u64::MAX));
@@ -425,18 +429,21 @@ mod tests {
 
     #[test]
     fn vfs_v02_open_rejects_empty_path() {
+        let _g = serial();
         reset_for_tests();
         assert_eq!(vfs_open(b"", O_RDONLY), Err(VfsErr::InvalidPath));
     }
 
     #[test]
     fn vfs_v02_open_rejects_zero_mode() {
+        let _g = serial();
         reset_for_tests();
         assert_eq!(vfs_open(b"/foo", 0), Err(VfsErr::InvalidMode));
     }
 
     #[test]
     fn vfs_v02_open_rejects_unknown_mode_bits() {
+        let _g = serial();
         reset_for_tests();
         // bit 7 is outside MODE_MASK
         assert_eq!(vfs_open(b"/foo", 0b1000_0000), Err(VfsErr::InvalidMode));
@@ -449,6 +456,7 @@ mod tests {
 
     #[test]
     fn vfs_v02_open_allocates_lowest_free_slot_starting_at_3() {
+        let _g = serial();
         reset_for_tests();
         let fd = vfs_open(b"/dev/null", O_RDONLY).expect("first open must succeed");
         assert_eq!(
@@ -460,6 +468,7 @@ mod tests {
 
     #[test]
     fn vfs_v02_open_returns_monotonic_lowest_free() {
+        let _g = serial();
         reset_for_tests();
         let a = vfs_open(b"/a", O_RDONLY).expect("a");
         let b = vfs_open(b"/b", O_WRONLY).expect("b");
@@ -471,6 +480,7 @@ mod tests {
 
     #[test]
     fn vfs_v02_open_then_close_recycles_lowest_slot() {
+        let _g = serial();
         reset_for_tests();
         let a = vfs_open(b"/a", O_RDONLY).expect("a");
         let b = vfs_open(b"/b", O_RDONLY).expect("b");
@@ -484,6 +494,7 @@ mod tests {
 
     #[test]
     fn vfs_v02_close_rejects_reserved_fds() {
+        let _g = serial();
         reset_for_tests();
         assert_eq!(vfs_close(STDIN_FD), Err(VfsErr::InvalidOpForFd));
         assert_eq!(vfs_close(STDOUT_FD), Err(VfsErr::InvalidOpForFd));
@@ -492,6 +503,7 @@ mod tests {
 
     #[test]
     fn vfs_v02_close_rejects_out_of_range_fd() {
+        let _g = serial();
         reset_for_tests();
         assert_eq!(vfs_close(FD_TABLE_SIZE as u64), Err(VfsErr::InvalidFd));
         assert_eq!(vfs_close(u64::MAX), Err(VfsErr::InvalidFd));
@@ -499,6 +511,7 @@ mod tests {
 
     #[test]
     fn vfs_v02_close_rejects_free_slot() {
+        let _g = serial();
         reset_for_tests();
         // Slot 5 was never opened — closing it must error.
         assert_eq!(vfs_close(5), Err(VfsErr::InvalidFd));
@@ -506,6 +519,7 @@ mod tests {
 
     #[test]
     fn vfs_v02_double_close_rejects() {
+        let _g = serial();
         reset_for_tests();
         let fd = vfs_open(b"/foo", O_RDONLY).expect("open");
         assert_eq!(vfs_close(fd), Ok(()));
@@ -515,6 +529,7 @@ mod tests {
 
     #[test]
     fn vfs_v02_reset_clears_user_slots_but_reserved_stay_open() {
+        let _g = serial();
         reset_for_tests();
         let fd = vfs_open(b"/foo", O_RDONLY).expect("open");
         assert!(vfs_is_open(fd));
@@ -535,6 +550,7 @@ mod tests {
     #[test]
     #[ignore]
     fn vfs_v02_table_full_after_exhausting_user_slots() {
+        let _g = serial();
         reset_for_tests();
         let user_slot_count = FD_TABLE_SIZE - ((RESERVED_FD_MAX as usize) + 1);
         for _ in 0..user_slot_count {
@@ -548,6 +564,7 @@ mod tests {
     fn vfs_v02_read_on_user_slot_still_returns_invalid_fd() {
         // v0.2 has no backing for user FDs — vfs_read on them returns InvalidFd
         // even though the slot is Open. v0.3 will wire real backing via FileOps.
+        let _g = serial();
         reset_for_tests();
         let fd = vfs_open(b"/foo", O_RDWR).expect("open");
         let mut buf = [0u8; 16];
@@ -557,6 +574,7 @@ mod tests {
 
     #[test]
     fn vfs_v02_write_on_user_slot_still_returns_invalid_fd() {
+        let _g = serial();
         reset_for_tests();
         let fd = vfs_open(b"/foo", O_RDWR).expect("open");
         assert_eq!(vfs_write(fd, b"hello"), Err(VfsErr::InvalidFd));
@@ -587,6 +605,7 @@ mod tests {
 
     #[test]
     fn vfs_v03_open_dev_null_returns_devnull_binding() {
+        let _g = serial();
         reset_for_tests();
         let fd = vfs_open(b"/dev/null", O_RDWR).expect("open /dev/null");
         let kind = FD_STATE[fd as usize].load(Ordering::Acquire);
@@ -597,6 +616,7 @@ mod tests {
 
     #[test]
     fn vfs_v03_open_dev_bus_envelope_returns_busenvelope_binding() {
+        let _g = serial();
         reset_for_tests();
         let fd = vfs_open(b"/dev/bus/envelope", O_RDWR).expect("open envelope FD");
         let kind = FD_STATE[fd as usize].load(Ordering::Acquire);
@@ -607,6 +627,7 @@ mod tests {
 
     #[test]
     fn vfs_v03_read_devnull_returns_eof() {
+        let _g = serial();
         reset_for_tests();
         let fd = vfs_open(b"/dev/null", O_RDONLY).expect("open");
         let mut buf = [0u8; 16];
@@ -616,6 +637,7 @@ mod tests {
 
     #[test]
     fn vfs_v03_write_devnull_discards_and_returns_buf_len() {
+        let _g = serial();
         reset_for_tests();
         let fd = vfs_open(b"/dev/null", O_WRONLY).expect("open");
         assert_eq!(vfs_write(fd, b"hello world"), Ok(11));
@@ -626,6 +648,7 @@ mod tests {
 
     #[test]
     fn vfs_v03_read_busenvelope_empty_returns_would_block() {
+        let _g = serial();
         reset_for_tests();
         crate::envelope::reset_slot_for_tests();
         let fd = vfs_open(b"/dev/bus/envelope", O_RDWR).expect("open");
@@ -636,6 +659,7 @@ mod tests {
 
     #[test]
     fn vfs_v03_busenvelope_write_then_read_round_trip() {
+        let _g = serial();
         reset_for_tests();
         crate::envelope::reset_slot_for_tests();
         let fd = vfs_open(b"/dev/bus/envelope", O_RDWR).expect("open");
@@ -656,6 +680,7 @@ mod tests {
 
     #[test]
     fn vfs_v03_busenvelope_write_oversize_returns_payload_oversize() {
+        let _g = serial();
         reset_for_tests();
         crate::envelope::reset_slot_for_tests();
         let fd = vfs_open(b"/dev/bus/envelope", O_WRONLY).expect("open");
@@ -667,6 +692,7 @@ mod tests {
 
     #[test]
     fn vfs_v03_close_releases_devnull_binding() {
+        let _g = serial();
         reset_for_tests();
         let fd = vfs_open(b"/dev/null", O_RDWR).expect("open");
         assert_eq!(vfs_close(fd), Ok(()));
@@ -679,6 +705,7 @@ mod tests {
 
     #[test]
     fn vfs_v03_close_releases_busenvelope_binding() {
+        let _g = serial();
         reset_for_tests();
         let fd = vfs_open(b"/dev/bus/envelope", O_RDWR).expect("open");
         assert_eq!(vfs_close(fd), Ok(()));

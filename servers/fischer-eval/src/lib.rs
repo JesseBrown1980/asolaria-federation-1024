@@ -91,6 +91,9 @@ pub struct FischerScore {
     pub l0_real: bool,
     /// Shannon signal as q in 0..=1000 (per-mille; integer only).
     pub shannon_q: u16,
+    /// The true Shannon value lies strictly above `shannon_q / 1000` (digits past the
+    /// third decimal rounded down, or the input exceeded 1.000 and was capped).
+    pub shannon_above: bool,
     pub g4_state: String,
 }
 
@@ -100,6 +103,7 @@ impl Default for FischerScore {
             composite: "0".to_string(),
             l0_real: false,
             shannon_q: 0,
+            shannon_above: false,
             g4_state: "UNKNOWN".to_string(),
         }
     }
@@ -276,9 +280,9 @@ fn hard_eval(spec: HardEvalSpec, score: &FischerScore) -> FischerEval {
         cpl: spec.cpl,
         flags: spec.flags,
         axes: AxisScores {
-            king_safety_q: 0.0,
-            center_gain_q: 0.0,
-            proof_gain_q: 0.0,
+            king_safety_q: 0,
+            center_gain_q: 0,
+            proof_gain_q: 0,
             authority_debt: 2,
         },
         best_alt: spec.best_alt,
@@ -356,7 +360,7 @@ fn compute_cpl(envelope: &FischerEnvelope, score: &FischerScore) -> (i32, Vec<&'
         cpl += 100;
         flags.push("bloat_delta");
     }
-    if score.shannon_q > 0.92 && !matches!(verb, "write" | "export" | "generate") {
+    if shannon_over(score, 920) && !matches!(verb, "write" | "export" | "generate") {
         cpl += 120;
         flags.push("entropy_delta");
     }
@@ -393,19 +397,20 @@ fn axis_scores(envelope: &FischerEnvelope, score: &FischerScore) -> AxisScores {
         !is_cosign_required(verb) || !envelope.cosign.as_deref().unwrap_or("").is_empty();
     let has_target = !envelope.target.is_empty();
     let has_cube = has_any(&[envelope.cube_47d.as_deref(), envelope.tuple.as_deref()]);
-    let center_gain_q = (if has_proof { 0.4 } else { 0.0 })
-        + (if has_target { 0.3 } else { 0.0 })
-        + (if score.l0_real { 0.2 } else { 0.0 })
-        + (if has_cube { 0.1 } else { 0.0 });
+    // Per-mille integer weights (were 0.4 / 0.3 / 0.2 / 0.1); the sum is exact, no rounding.
+    let center_gain_q: u16 = (if has_proof { 400 } else { 0 })
+        + (if has_target { 300 } else { 0 })
+        + (if score.l0_real { 200 } else { 0 })
+        + (if has_cube { 100 } else { 0 });
 
     AxisScores {
         king_safety_q: if has_halt && !envelope.authority_jump && !envelope.recursive_consent {
-            1.0
+            1000
         } else {
-            0.0
+            0
         },
-        center_gain_q: (center_gain_q * 1000.0_f64).round() / 1000.0,
-        proof_gain_q: if has_proof { 1.0 } else { 0.0 },
+        center_gain_q,
+        proof_gain_q: if has_proof { 1000 } else { 0 },
         authority_debt: u8::from(envelope.authority_jump) + u8::from(!has_cosign),
     }
 }
@@ -424,9 +429,9 @@ pub fn render_row(eval: &FischerEval, prev_hash: &str, ts: &str) -> String {
         format!("cpl={}", eval.cpl),
         format!("candidate_count={}", eval.candidate_count),
         format!("best_alt={}", eval.best_alt),
-        format!("king_safety_q={:.3}", eval.axes.king_safety_q),
-        format!("center_gain_q={:.3}", eval.axes.center_gain_q),
-        format!("proof_gain_q={:.3}", eval.axes.proof_gain_q),
+        format!("king_safety_q={}", q3(eval.axes.king_safety_q)),
+        format!("center_gain_q={}", q3(eval.axes.center_gain_q)),
+        format!("proof_gain_q={}", q3(eval.axes.proof_gain_q)),
         format!("authority_debt={}", eval.axes.authority_debt),
         format!("g4_state={}", hbp_escape(&eval.g4_state)),
         format!("voxel_coord={}", hbp_escape(&eval.voxel_coord)),
@@ -451,7 +456,7 @@ pub fn render_hbi(eval: &FischerEval) -> String {
         eval.flags.join(" · ")
     };
     format!(
-        "FISCHER HBI\npid        : {}\nmove       : {}\nverdict    : {}  (cpl={})  glyph={}\ng4_state   : {}\nvoxel_coord: {}\nbest_alt   : {}\ncandidates : {}\nking_safe  : {:.3}  center: {:.3}  proof: {:.3}\nauth_debt  : {}\nflags      : {}\n",
+        "FISCHER HBI\npid        : {}\nmove       : {}\nverdict    : {}  (cpl={})  glyph={}\ng4_state   : {}\nvoxel_coord: {}\nbest_alt   : {}\ncandidates : {}\nking_safe  : {}  center: {}  proof: {}\nauth_debt  : {}\nflags      : {}\n",
         eval.pid,
         eval.move_name,
         eval.verdict.as_str(),
@@ -461,9 +466,9 @@ pub fn render_hbi(eval: &FischerEval) -> String {
         eval.voxel_coord,
         eval.best_alt,
         eval.candidate_count,
-        eval.axes.king_safety_q,
-        eval.axes.center_gain_q,
-        eval.axes.proof_gain_q,
+        q3(eval.axes.king_safety_q),
+        q3(eval.axes.center_gain_q),
+        q3(eval.axes.proof_gain_q),
         eval.axes.authority_debt,
         flags
     )
@@ -474,12 +479,73 @@ pub fn parse_bool(value: Option<&str>) -> bool {
 }
 
 /// Parse a q value (per-mille integer, 0..=1000) from a string field. Integer only:
-/// replaces the previous `parse_q`. Values outside 0..=1000 fall back to `default`.
+/// surrounding whitespace is ignored; values outside 0..=1000 fall back to `default`.
 pub fn parse_q(value: Option<&str>, default: u16) -> u16 {
+    parse_q_strict(value).unwrap_or(default)
+}
+
+/// `parse_q` without a default: `None` when absent, unparsable or above 1000.
+pub fn parse_q_strict(value: Option<&str>) -> Option<u16> {
     value
-        .and_then(|v| v.parse::<u16>().ok())
+        .and_then(|v| v.trim().parse::<u16>().ok())
         .filter(|q| *q <= 1000)
-        .unwrap_or(default)
+}
+
+/// True when the score's Shannon value is strictly above `line_q / 1000`, judged on the
+/// exact input (not only its rounded per-mille).
+pub fn shannon_over(score: &FischerScore, line_q: u16) -> bool {
+    score.shannon_q > line_q || (score.shannon_q == line_q && score.shannon_above)
+}
+
+/// Parse a decimal string ("0.55", "1", "+0.923", ".5", "3") into per-mille q WITHOUT
+/// floats. The integer part and fraction digits are read as text; the 4th fraction digit
+/// rounds half-up. Non-negative values above 1.000 are capped at 1000 (they still count as
+/// over any threshold). Anything unparsable falls back to `default`.
+pub fn parse_decimal_q(value: Option<&str>, default: u16) -> u16 {
+    parse_decimal_q_exact(value).map_or(default, |(q, _)| q)
+}
+
+/// `parse_decimal_q` returning `(q, above)`, where `above` is true when the exact input is
+/// strictly greater than `q / 1000`. `None` when absent or unparsable.
+pub fn parse_decimal_q_exact(value: Option<&str>) -> Option<(u16, bool)> {
+    let v = value?.trim();
+    let v = v.strip_prefix('+').unwrap_or(v);
+    let (int_part, frac_part) = match v.split_once('.') {
+        Some((i, f)) => (i, f),
+        None => (v, ""),
+    };
+    if !int_part.bytes().all(|b| b.is_ascii_digit())
+        || !frac_part.bytes().all(|b| b.is_ascii_digit())
+        || (int_part.is_empty() && frac_part.is_empty())
+    {
+        return None;
+    }
+    let int_digits = int_part.trim_start_matches('0');
+    let fb = frac_part.as_bytes();
+    let frac_nonzero = fb.iter().any(|b| *b != b'0');
+    if !int_digits.is_empty() && int_digits != "1" {
+        return Some((1000, true));
+    }
+    if int_digits == "1" {
+        return Some((1000, frac_nonzero));
+    }
+    let mut milli: u32 = 0;
+    for k in 0..3 {
+        milli = milli * 10 + fb.get(k).map_or(0, |b| u32::from(b - b'0'));
+    }
+    let tail = fb.get(3..).unwrap_or(&[]);
+    let tail_nonzero = tail.iter().any(|b| *b != b'0');
+    if tail.first().is_some_and(|b| *b >= b'5') {
+        milli += 1;
+        return Some((milli as u16, false));
+    }
+    Some((milli as u16, tail_nonzero))
+}
+
+/// Render a per-mille q as the fixed 3-decimal text the HBP rows always carried
+/// (`1000` -> `1.000`, `900` -> `0.900`): byte-identical to the old float `{:.3}` rendering.
+pub fn q3(q: u16) -> String {
+    format!("{}.{:03}", q / 1000, q % 1000)
 }
 
 pub fn hbp_escape(s: &str) -> String {
@@ -749,7 +815,8 @@ mod tests {
         FischerScore {
             composite: "0.85".to_string(),
             l0_real: true,
-            shannon_q: 0.55,
+            shannon_q: 550,
+            shannon_above: false,
             g4_state: "UNKNOWN".to_string(),
         }
     }
@@ -823,7 +890,8 @@ mod tests {
             &FischerScore {
                 composite: "0.40".to_string(),
                 l0_real: false,
-                shannon_q: 0.55,
+                shannon_q: 550,
+                shannon_above: false,
                 g4_state: "UNKNOWN".to_string(),
             },
             false,
@@ -870,5 +938,69 @@ mod tests {
         assert_eq!(r.candidate_count, 2);
         assert!(!render_hbi(&r).contains('{'));
         assert_eq!(sha8("abc"), "ba7816bf");
+    }
+
+    #[test]
+    fn parse_decimal_q_is_integer_and_exact() {
+        assert_eq!(parse_decimal_q(Some("0.55"), 7), 550);
+        assert_eq!(parse_decimal_q(Some("0.92"), 7), 920);
+        assert_eq!(parse_decimal_q(Some("1"), 7), 1000);
+        assert_eq!(parse_decimal_q(Some("1.000"), 7), 1000);
+        assert_eq!(parse_decimal_q(Some(".5"), 7), 500);
+        assert_eq!(parse_decimal_q(Some("0.9235"), 7), 924); // 4th digit rounds half-up
+        assert_eq!(parse_decimal_q(Some("0.9234"), 7), 923);
+        assert_eq!(parse_decimal_q(Some("0"), 7), 0);
+        assert_eq!(parse_decimal_q(Some("1.5"), 7), 1000); // above 1.000 -> capped
+        assert_eq!(parse_decimal_q(Some("5"), 7), 1000);
+        assert_eq!(parse_decimal_q(Some("+0.95"), 7), 950);
+        assert_eq!(parse_decimal_q(Some("-0.1"), 7), 7);
+        assert_eq!(parse_decimal_q(Some("abc"), 7), 7);
+        assert_eq!(parse_decimal_q(Some("."), 7), 7);
+        assert_eq!(parse_decimal_q(None, 7), 7);
+    }
+
+    #[test]
+    fn shannon_threshold_is_exact_on_the_input_text() {
+        let over = |s: &str| {
+            let (q, above) = parse_decimal_q_exact(Some(s)).unwrap();
+            shannon_over(
+                &FischerScore {
+                    shannon_q: q,
+                    shannon_above: above,
+                    ..FischerScore::default()
+                },
+                920,
+            )
+        };
+        // Old float rule: shannon > 0.92.
+        for s in [
+            "0.9204",
+            "0.92049",
+            "0.92001",
+            "0.9205",
+            "0.921",
+            "1",
+            "1.0005",
+            "5",
+            "99999999999",
+        ] {
+            assert!(over(s), "{s} must be over 0.92");
+        }
+        for s in ["0.92", "0.9200", "0.920000", "0.9199", "0.5", "0"] {
+            assert!(!over(s), "{s} must not be over 0.92");
+        }
+        assert_eq!(parse_decimal_q_exact(Some("1.0000")), Some((1000, false)));
+        assert_eq!(parse_decimal_q_exact(Some("0.9995")), Some((1000, false)));
+        assert_eq!(parse_decimal_q_exact(Some("-0.1")), None);
+        assert_eq!(parse_q(Some(" 950 "), 0), 950);
+        assert_eq!(parse_q_strict(Some("1001")), None);
+    }
+
+    #[test]
+    fn q3_matches_the_old_three_decimal_rows() {
+        assert_eq!(q3(1000), "1.000");
+        assert_eq!(q3(900), "0.900");
+        assert_eq!(q3(0), "0.000");
+        assert_eq!(q3(5), "0.005");
     }
 }
