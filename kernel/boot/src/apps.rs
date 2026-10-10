@@ -382,7 +382,12 @@ pub(crate) fn draw_icon(cv: &mut Canvas, app: App, x: i32, y: i32) {
         App::Devices => {
             cv.round_vgrad(r, 10, rgb(0x14, 0x4d, 0x3a), rgb(0x08, 0x24, 0x1b));
             // an expansion card with gold edge contacts and two chips
-            cv.round(Rect::new(x + 8, y + 12, 32, 20), 3, rgb(0x2f, 0xa8, 0x6e), 256);
+            cv.round(
+                Rect::new(x + 8, y + 12, 32, 20),
+                3,
+                rgb(0x2f, 0xa8, 0x6e),
+                256,
+            );
             cv.fill(Rect::new(x + 12, y + 16, 9, 8), rgb(0x10, 0x2a, 0x20));
             cv.fill(Rect::new(x + 24, y + 16, 12, 8), rgb(0x10, 0x2a, 0x20));
             for k in 0..6 {
@@ -395,7 +400,11 @@ pub(crate) fn draw_icon(cv: &mut Canvas, app: App, x: i32, y: i32) {
             cv.ring(x + 24, y + 24, 17, 2, AMBER);
             for k in 0..12 {
                 let m = k * 5;
-                cv.put(x + 24 + sin60(m) * 14 / 1000, y + 24 - cos60(m) * 14 / 1000, rgb(0x60, 0x40, 0x10));
+                cv.put(
+                    x + 24 + sin60(m) * 14 / 1000,
+                    y + 24 - cos60(m) * 14 / 1000,
+                    rgb(0x60, 0x40, 0x10),
+                );
             }
             cv.line_w(x + 24, y + 24, x + 24, y + 13, 2, rgb(0x30, 0x20, 0x08));
             cv.line_w(x + 24, y + 24, x + 32, y + 28, 2, rgb(0x30, 0x20, 0x08));
@@ -436,9 +445,23 @@ pub(crate) fn draw_body(cv: &mut Canvas, app: App, body: Rect, v: &View, term: &
         App::Console => draw_console(cv, body, term, v),
         App::System => {
             let mut b = Buf::new();
-            kv(cv, x, y, b"Kernel", asolaria_kernel_core::KERNEL_VERSION.as_bytes(), CYAN);
+            kv(
+                cv,
+                x,
+                y,
+                b"Kernel",
+                asolaria_kernel_core::KERNEL_VERSION.as_bytes(),
+                CYAN,
+            );
             y += lh;
-            kv(cv, x, y, b"Anchor", asolaria_kernel_core::FEDERATION_ANCHOR_PID.as_bytes(), TEXT);
+            kv(
+                cv,
+                x,
+                y,
+                b"Anchor",
+                asolaria_kernel_core::FEDERATION_ANCHOR_PID.as_bytes(),
+                TEXT,
+            );
             y += lh;
             b.hex(&v.facts.device_digest[..8]);
             kv(cv, x, y, b"device_pid", b.get(), TEXT);
@@ -447,21 +470,37 @@ pub(crate) fn draw_body(cv: &mut Canvas, app: App, body: Rect, v: &View, term: &
             b.hex(&v.facts.boot_pid);
             kv(cv, x, y, b"boot_pid", b.get(), TEXT);
             y += lh;
-            kv(cv, x, y, b"Boot clock", &v.facts.utc[..v.facts.utc_len], TEXT);
+            kv(
+                cv,
+                x,
+                y,
+                b"Boot clock",
+                &v.facts.utc[..v.facts.utc_len],
+                TEXT,
+            );
             y += lh;
             b = Buf::new();
-            b.s(v.fw_vendor).s(b"  rev ").dec((v.fw_rev >> 16) as u64).s(b".").dec((v.fw_rev & 0xFFFF) as u64);
+            b.s(v.fw_vendor)
+                .s(b"  rev ")
+                .dec((v.fw_rev >> 16) as u64)
+                .s(b".")
+                .dec((v.fw_rev & 0xFFFF) as u64);
             kv(cv, x, y, b"Firmware", b.get(), TEXT);
             y += lh;
             b = Buf::new();
             b.dec(v.gop_w as u64).s(b" x ").dec(v.gop_h as u64).s(b"  ");
-            b.s(if v.gop_fmt == 0 { b"RGBx" } else { b"BGRx" }).s(b"  stride ").dec(v.gop_pps as u64);
+            b.s(if v.gop_fmt == 0 { b"RGBx" } else { b"BGRx" })
+                .s(b"  stride ")
+                .dec(v.gop_pps as u64);
             kv(cv, x, y, b"Display (GOP)", b.get(), TEXT);
             y += lh;
             b = Buf::new();
             match v.mem {
                 Some((free, total)) => {
-                    b.dec(free >> 20).s(b" MiB free of ").dec(total >> 20).s(b" MiB (UEFI map)");
+                    b.dec(free >> 20)
+                        .s(b" MiB free of ")
+                        .dec(total >> 20)
+                        .s(b" MiB (UEFI map)");
                 }
                 None => {
                     b.s(b"not read (memory map unavailable)");
@@ -483,9 +522,27 @@ pub(crate) fn draw_body(cv: &mut Canvas, app: App, body: Rect, v: &View, term: &
             kv(cv, x, y, b"PCI", b.get(), TEXT);
             y += lh;
             let wd = console::watchdog_text(v.wd);
-            kv(cv, x, y, b"Watchdog", wd, if matches!(v.wd, Watchdog::Disabled | Watchdog::Unsupported) { GREEN } else { RED });
+            kv(
+                cv,
+                x,
+                y,
+                b"Watchdog",
+                wd,
+                if matches!(v.wd, Watchdog::Disabled | Watchdog::Unsupported) {
+                    GREEN
+                } else {
+                    RED
+                },
+            );
             y += lh;
-            kv(cv, x, y, b"Engines", b"E=0  fire=0  (nothing fires but what you click)", GREEN);
+            kv(
+                cv,
+                x,
+                y,
+                b"Engines",
+                b"E=0  fire=0  (nothing fires but what you click)",
+                GREEN,
+            );
         }
         App::Devices => draw_devices(cv, body, v, scroll),
         App::Clock => draw_clock(cv, body, v),
@@ -493,8 +550,26 @@ pub(crate) fn draw_body(cv: &mut Canvas, app: App, body: Rect, v: &View, term: &
             cv.text(x, y, b"Leave the Asolaria desktop:", TEXT, 1);
             let (r1, r2, r3) = power_buttons(body);
             let c = v.power_confirm;
-            button(cv, r1, if c == Some(0) { b"Click again: RESTART" } else { b"Restart  (R)" }, if c == Some(0) { RED } else { AMBER });
-            button(cv, r2, if c == Some(2) { b"Click again: POWER OFF" } else { b"Power off  (P)" }, RED);
+            button(
+                cv,
+                r1,
+                if c == Some(0) {
+                    b"Click again: RESTART"
+                } else {
+                    b"Restart  (R)"
+                },
+                if c == Some(0) { RED } else { AMBER },
+            );
+            button(
+                cv,
+                r2,
+                if c == Some(2) {
+                    b"Click again: POWER OFF"
+                } else {
+                    b"Power off  (P)"
+                },
+                RED,
+            );
             button(cv, r3, b"Text console  (T)", CYAN);
             let note: &[u8] = if c.is_some() {
                 b"Confirm with a second click or Enter. Esc cancels."
@@ -504,7 +579,14 @@ pub(crate) fn draw_body(cv: &mut Canvas, app: App, body: Rect, v: &View, term: &
             cv.text(x, body.y + body.h - 26, note, DIM, 1);
         }
         App::About => {
-            iso_cube(cv, body.x + 86, body.y + 104, 58, 256, rgb(0x05, 0x10, 0x18));
+            iso_cube(
+                cv,
+                body.x + 86,
+                body.y + 104,
+                58,
+                256,
+                rgb(0x05, 0x10, 0x18),
+            );
             let tx = body.x + 176;
             cv.text(tx, y + 6, b"ASOLARIA ASI OS", CYAN, 2);
             y += 50;
@@ -515,7 +597,10 @@ pub(crate) fn draw_body(cv: &mut Canvas, app: App, body: Rect, v: &View, term: &
                 (b"hot path: HBI -> HBP -> SHA -> SH -> HASH", DIM),
                 (b"built by seat ACER-CLAUDE-FABLE5", DIM),
                 (b"pid 8467a937cba309f7  .  owner OP-JESSE", DIM),
-                (b"E=0  .  fire=0  .  nothing fires but what you click", GREEN),
+                (
+                    b"E=0  .  fire=0  .  nothing fires but what you click",
+                    GREEN,
+                ),
             ];
             for (s, c) in lines {
                 cv.text(tx, y, s, c, 1);
@@ -525,15 +610,36 @@ pub(crate) fn draw_body(cv: &mut Canvas, app: App, body: Rect, v: &View, term: &
         App::Help => {
             let lines: [(&[u8], u32); 14] = [
                 (b"MOUSE / TOUCHPAD", CYAN),
-                (b"  double-click an icon to open it; drag a title bar to move", TEXT),
-                (b"  click the taskbar to switch, minimise or restore windows", TEXT),
+                (
+                    b"  double-click an icon to open it; drag a title bar to move",
+                    TEXT,
+                ),
+                (
+                    b"  click the taskbar to switch, minimise or restore windows",
+                    TEXT,
+                ),
                 (b"  wheel scrolls the Console and Devices windows", TEXT),
-                (b"KEYBOARD (always works, even with no pointer driver)", CYAN),
-                (b"  F1 help    F2 start menu    F3 next window    F4 close", TEXT),
+                (
+                    b"KEYBOARD (always works, even with no pointer driver)",
+                    CYAN,
+                ),
+                (
+                    b"  F1 help    F2 start menu    F3 next window    F4 close",
+                    TEXT,
+                ),
                 (b"  F5 keyboard pointer: arrows move, Enter clicks,", TEXT),
-                (b"     Space holds the button (drag), Esc leaves the mode", TEXT),
-                (b"  on the desktop: arrows / Tab pick an icon, Enter opens", TEXT),
-                (b"  Console: type a command, Enter runs it, PgUp/PgDn scroll", TEXT),
+                (
+                    b"     Space holds the button (drag), Esc leaves the mode",
+                    TEXT,
+                ),
+                (
+                    b"  on the desktop: arrows / Tab pick an icon, Enter opens",
+                    TEXT,
+                ),
+                (
+                    b"  Console: type a command, Enter runs it, PgUp/PgDn scroll",
+                    TEXT,
+                ),
                 (b"CONSOLE COMMANDS", CYAN),
                 (b"  ping  vers  pid  info  devices  clear  help", TEXT),
                 (b"  text (text console)   reboot   poweroff", TEXT),
@@ -545,9 +651,25 @@ pub(crate) fn draw_body(cv: &mut Canvas, app: App, body: Rect, v: &View, term: &
             }
             let mut b = Buf::new();
             pointer_line(&mut b, v);
-            cv.text(x, y, b.get(), if v.ptr_simple + v.ptr_abs > 0 { GREEN } else { AMBER }, 1);
+            cv.text(
+                x,
+                y,
+                b.get(),
+                if v.ptr_simple + v.ptr_abs > 0 {
+                    GREEN
+                } else {
+                    AMBER
+                },
+                1,
+            );
             if v.kbd_pointer {
-                cv.text(x, y + lh, b"  keyboard pointer is ON  (F5 or Esc leaves it)", AMBER, 1);
+                cv.text(
+                    x,
+                    y + lh,
+                    b"  keyboard pointer is ON  (F5 or Esc leaves it)",
+                    AMBER,
+                    1,
+                );
             }
         }
     }
@@ -555,10 +677,20 @@ pub(crate) fn draw_body(cv: &mut Canvas, app: App, body: Rect, v: &View, term: &
 
 /// "simple N  absolute M  (...)" — the pointer report used by Help, Devices and the tray.
 pub(crate) fn pointer_line(b: &mut Buf, v: &View) {
-    b.s(b"  ").s(v.ptr_note).s(b"  relative ").dec(v.ptr_simple as u64);
+    b.s(b"  ")
+        .s(v.ptr_note)
+        .s(b"  relative ")
+        .dec(v.ptr_simple as u64);
     b.s(b"  absolute ").dec(v.ptr_abs as u64);
-    b.s(b"  (fw handles ").dec(v.ptr_handles.0 as u64).s(b"/").dec(v.ptr_handles.1 as u64);
-    b.s(if v.ptr_splitter { b" via splitter" } else { b"" });
+    b.s(b"  (fw handles ")
+        .dec(v.ptr_handles.0 as u64)
+        .s(b"/")
+        .dec(v.ptr_handles.1 as u64);
+    b.s(if v.ptr_splitter {
+        b" via splitter"
+    } else {
+        b""
+    });
     if v.usb_connected > 0 {
         b.s(b", usb hosts asked ").dec(v.usb_connected as u64);
     }
@@ -569,7 +701,11 @@ pub(crate) fn pointer_line(b: &mut Buf, v: &View) {
 }
 
 pub(crate) fn hms(b: &mut Buf, s: u64) {
-    b.dec(s / 3600).s(b":").d2(((s / 60) % 60) as u8).s(b":").d2((s % 60) as u8);
+    b.dec(s / 3600)
+        .s(b":")
+        .d2(((s / 60) % 60) as u8)
+        .s(b":")
+        .d2((s % 60) as u8);
 }
 
 /// The three Power buttons: (restart, power off, text console).
@@ -654,8 +790,12 @@ fn draw_devices(cv: &mut Canvas, body: Rect, v: &View, scroll: i32) {
     cv.text(x, y, b"DRIVERS IN USE", CYAN, 1);
     y += lh + 2;
     let mut b = Buf::new();
-    b.s(b"Display    GOP framebuffer ").dec(v.gop_w as u64).s(b"x").dec(v.gop_h as u64);
-    b.s(if v.gop_fmt == 0 { b" RGBx" } else { b" BGRx" }).s(b" -> desktop back buffer");
+    b.s(b"Display    GOP framebuffer ")
+        .dec(v.gop_w as u64)
+        .s(b"x")
+        .dec(v.gop_h as u64);
+    b.s(if v.gop_fmt == 0 { b" RGBx" } else { b" BGRx" })
+        .s(b" -> desktop back buffer");
     cv.text(x, y, b.get(), TEXT, 1);
     y += lh;
     cv.text(x, y, b"Keyboard   UEFI Simple Text Input (ConIn)", TEXT, 1);
@@ -663,7 +803,17 @@ fn draw_devices(cv: &mut Canvas, body: Rect, v: &View, scroll: i32) {
     b = Buf::new();
     b.s(b"Pointer  ");
     pointer_line(&mut b, v);
-    cv.text(x, y, b.get(), if v.ptr_simple + v.ptr_abs > 0 { TEXT } else { AMBER }, 1);
+    cv.text(
+        x,
+        y,
+        b.get(),
+        if v.ptr_simple + v.ptr_abs > 0 {
+            TEXT
+        } else {
+            AMBER
+        },
+        1,
+    );
     y += lh;
     let st: &[u8] = if v.facts.rst_vmd {
         b"Storage    Intel RST/VMD 8086:282A gate MATCHED (scaffold: VMD walk is the next step)"
@@ -673,7 +823,13 @@ fn draw_devices(cv: &mut Canvas, body: Rect, v: &View, scroll: i32) {
     cv.text(x, y, st, if v.facts.rst_vmd { AMBER } else { DIM }, 1);
     y += lh + 6;
     cv.fill(Rect::new(body.x + 8, y - 4, body.w - 16, 1), LINE);
-    cv.text(x, y, b"BUS:DV.F  VEN:DEV    CLASS  TYPE                          VENDOR", DIM, 1);
+    cv.text(
+        x,
+        y,
+        b"BUS:DV.F  VEN:DEV    CLASS  TYPE                          VENDOR",
+        DIM,
+        1,
+    );
     let head_y = y;
     y += lh;
     let n = (v.facts.pci_devices as usize).min(v.facts.pci.len());
@@ -685,20 +841,38 @@ fn draw_devices(cv: &mut Canvas, body: Rect, v: &View, scroll: i32) {
             break;
         }
         if k % 2 == 0 {
-            cv.fill(Rect::new(body.x + 8, ry - 2, body.w - 16, lh), rgb(0x10, 0x18, 0x2a));
+            cv.fill(
+                Rect::new(body.x + 8, ry - 2, body.w - 16, lh),
+                rgb(0x10, 0x18, 0x2a),
+            );
         }
         let mut b = Buf::new();
-        b.hex(&[d.bus]).s(b":").hex(&[d.dev]).s(b".").dec(d.func as u64).pad(10);
+        b.hex(&[d.bus])
+            .s(b":")
+            .hex(&[d.dev])
+            .s(b".")
+            .dec(d.func as u64)
+            .pad(10);
         b.hex16(d.vendor).s(b":").hex16(d.device).pad(21);
         b.hex(&[d.class]).s(b":").hex(&[d.subclass]).pad(28);
-        b.s(class_name(d.class, d.subclass)).pad(58).s(vendor_name(d.vendor));
-        let c = if d.vendor == 0x8086 && d.device == 0x282A { AMBER } else { TEXT };
+        b.s(class_name(d.class, d.subclass))
+            .pad(58)
+            .s(vendor_name(d.vendor));
+        let c = if d.vendor == 0x8086 && d.device == 0x282A {
+            AMBER
+        } else {
+            TEXT
+        };
         cv.text(x, ry, b.get(), c, 1);
     }
     cv.restore_clip(old);
     if n > 0 {
         let mut b = Buf::new();
-        b.dec(first as u64 + 1).s(b"-").dec(n as u64).s(b" of ").dec(n as u64);
+        b.dec(first as u64 + 1)
+            .s(b"-")
+            .dec(n as u64)
+            .s(b" of ")
+            .dec(n as u64);
         let w = text_w(b.get(), 1);
         cv.text(body.x + body.w - w - 12, head_y, b.get(), DIM, 1);
     }
@@ -711,14 +885,31 @@ fn draw_clock(cv: &mut Canvas, body: Rect, v: &View) {
     cv.disc(cx, cy, r, rgb(0x10, 0x18, 0x2c));
     cv.ring(cx, cy, r, 3, AMBER);
     for m in 0..60 {
-        let (ri, c) = if m % 5 == 0 { (r - 12, TEXT) } else { (r - 6, DIM) };
+        let (ri, c) = if m % 5 == 0 {
+            (r - 12, TEXT)
+        } else {
+            (r - 6, DIM)
+        };
         let (s, co) = (sin60(m), cos60(m));
-        cv.line(cx + s * ri / 1000, cy - co * ri / 1000, cx + s * (r - 3) / 1000, cy - co * (r - 3) / 1000, c);
+        cv.line(
+            cx + s * ri / 1000,
+            cy - co * ri / 1000,
+            cx + s * (r - 3) / 1000,
+            cy - co * (r - 3) / 1000,
+            c,
+        );
     }
     let t = v.now;
     let hpos = (t.hour as i32 % 12) * 5 + t.min as i32 / 12;
     let hand = |cv: &mut Canvas, pos: i32, len: i32, w: i32, c: u32| {
-        cv.line_w(cx, cy, cx + sin60(pos) * len / 1000, cy - cos60(pos) * len / 1000, w, c);
+        cv.line_w(
+            cx,
+            cy,
+            cx + sin60(pos) * len / 1000,
+            cy - cos60(pos) * len / 1000,
+            w,
+            c,
+        );
     };
     hand(cv, hpos, r * 50 / 100, 4, TEXT);
     hand(cv, t.min as i32, r * 75 / 100, 3, TEXT);
@@ -728,7 +919,12 @@ fn draw_clock(cv: &mut Canvas, body: Rect, v: &View) {
     b.d2(t.hour).s(b":").d2(t.min).s(b":").d2(t.sec);
     cv.text_center((body.x, body.w), cy + r + 12, b.get(), CYAN, 2, false);
     let mut d = Buf::new();
-    d.dec(t.year as u64).s(b"-").d2(t.month).s(b"-").d2(t.day).s(b"   CMOS real-time clock");
+    d.dec(t.year as u64)
+        .s(b"-")
+        .d2(t.month)
+        .s(b"-")
+        .d2(t.day)
+        .s(b"   CMOS real-time clock");
     cv.text_center((body.x, body.w), cy + r + 48, d.get(), DIM, 1, false);
 }
 

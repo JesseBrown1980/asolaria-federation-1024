@@ -51,13 +51,60 @@ unsafe fn controller_cmd(c: u8) -> bool {
     true
 }
 
-/// Send one byte to the mouse and return its reply (0xFA = ACK).
-unsafe fn aux_write(v: u8) -> Option<u8> {
+/// Drop pending KEYBOARD bytes (output buffer full, not aux) so an aux ACK can reach the
+/// output buffer. Only used around mouse commands (probe / suspend / resume); bounded.
+unsafe fn drop_kbd_bytes() {
+    for _ in 0..16 {
+        if inb(STAT) & AUX_FULL != 0x01 {
+            break;
+        }
+        let _ = inb(DATA);
+    }
+}
+
+/// Bounded drain of pending aux (mouse) bytes; returns how many were dropped. The text
+/// console calls this every idle tick so a stray mouse byte can never sit in the controller's
+/// single output buffer and starve the firmware keyboard driver.
+pub(crate) unsafe fn drain_aux() -> usize {
+    let mut n = 0;
+    while n < 32 && inb(STAT) & AUX_FULL == AUX_FULL {
+        let _ = inb(DATA);
+        n += 1;
+    }
+    n
+}
+
+/// Send one byte to the mouse and wait for its ACK (0xFA). Stray movement bytes that were
+/// already queued ahead of the ACK are skipped (bounded).
+unsafe fn aux_cmd(v: u8) -> bool {
+    drop_kbd_bytes();
     if !controller_cmd(0xD4) || !wait_input_clear() {
-        return None;
+        return false;
     }
     outb(DATA, v);
-    wait_aux_byte()
+    for _ in 0..8 {
+        match wait_aux_byte() {
+            Some(0xFA) => return true,
+            Some(0xFE) | Some(0xFC) | None => return false,
+            Some(_) => continue,
+        }
+    }
+    false
+}
+
+/// Read the controller configuration byte (command 0x20). None if it never arrived.
+unsafe fn read_config() -> Option<u8> {
+    drop_kbd_bytes();
+    if !controller_cmd(0x20) {
+        return None;
+    }
+    for _ in 0..200_000 {
+        let st = inb(STAT);
+        if st & 0x01 != 0 {
+            return Some(inb(DATA));
+        }
+    }
+    None
 }
 
 /// Outcome of the probe, for the on-screen/serial report.
@@ -70,32 +117,58 @@ pub(crate) enum Probe {
 
 impl Ps2 {
     /// Enable the aux port and stream mode. Returns the driver if the mouse acknowledged.
+    /// One retry; on failure the aux port is put back the way it was found.
     pub(crate) unsafe fn probe() -> (Option<Ps2>, Probe) {
         if inb(STAT) == 0xFF {
             return (None, Probe::NoController);
         }
-        // Drop any stale aux bytes left from firmware.
-        for _ in 0..16 {
-            if inb(STAT) & AUX_FULL != AUX_FULL {
-                break;
+        // Config bit 5 set = aux clock disabled before we touched it.
+        let was_disabled = read_config().map_or(true, |c| c & 0x20 != 0);
+        let _ = drain_aux();
+        for _attempt in 0..2 {
+            if !controller_cmd(0xA8) {
+                return (None, Probe::NoController);
             }
-            let _ = inb(DATA);
+            if aux_cmd(0xF6) && aux_cmd(0xF4) {
+                return (
+                    Some(Ps2 {
+                        pkt: [0; 3],
+                        n: 0,
+                        left: false,
+                        right: false,
+                    }),
+                    Probe::Ready,
+                );
+            }
+            let _ = drain_aux();
         }
-        if !controller_cmd(0xA8) {
-            return (None, Probe::NoController);
+        // Restore: streaming off (best effort), and the aux port disabled again if it was.
+        let _ = aux_cmd(0xF5);
+        let _ = drain_aux();
+        if was_disabled {
+            let _ = controller_cmd(0xA7);
         }
-        if aux_write(0xF6) != Some(0xFA) || aux_write(0xF4) != Some(0xFA) {
-            return (None, Probe::NoAck);
-        }
-        (
-            Some(Ps2 {
-                pkt: [0; 3],
-                n: 0,
-                left: false,
-                right: false,
-            }),
-            Probe::Ready,
-        )
+        (None, Probe::NoAck)
+    }
+
+    /// Stop the mouse before the screen is handed to the firmware text console: streaming off
+    /// (0xF5), aux port disabled (0xA7), pending aux bytes dropped. Nothing can then sit in the
+    /// controller's output buffer in front of keyboard bytes.
+    pub(crate) unsafe fn suspend(&mut self) {
+        let _ = aux_cmd(0xF5);
+        let _ = controller_cmd(0xA7);
+        let _ = drain_aux();
+        self.n = 0;
+    }
+
+    /// Undo [`suspend`]: aux port on (0xA8), streaming on (0xF4).
+    pub(crate) unsafe fn resume(&mut self) {
+        let _ = drain_aux();
+        let _ = controller_cmd(0xA8);
+        let _ = aux_cmd(0xF4);
+        self.n = 0;
+        self.left = false;
+        self.right = false;
     }
 
     /// Drain waiting aux bytes; returns accumulated (dx, dy, left, right) if a packet arrived.

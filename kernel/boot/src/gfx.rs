@@ -90,10 +90,12 @@ impl Canvas {
         Rect::new(0, 0, self.w, self.h)
     }
 
-    /// Restrict drawing to `r` (intersected with the canvas); returns the previous clip.
+    /// Restrict drawing to `r` intersected with the CURRENT clip (nested clips only shrink,
+    /// so a window body can never draw outside the dirty region it was given); returns the
+    /// previous clip for [`Canvas::restore_clip`].
     pub(crate) fn set_clip(&mut self, r: Rect) -> Rect {
         let old = self.clip;
-        self.clip = r.intersect(&self.bounds());
+        self.clip = r.intersect(&self.clip);
         old
     }
 
@@ -152,7 +154,9 @@ impl Canvas {
         if dy >= rad && dy < h - rad {
             return 0;
         }
-        (0..rad).find(|&dx| Self::in_round(dx, dy, w, h, rad)).unwrap_or(rad)
+        (0..rad)
+            .find(|&dx| Self::in_round(dx, dy, w, h, rad))
+            .unwrap_or(rad)
     }
 
     /// One horizontal span, solid or blended.
@@ -274,7 +278,11 @@ impl Canvas {
                 if ay == by {
                     continue;
                 }
-                let (top, bot) = if ay < by { ((ax, ay), (bx, by)) } else { ((bx, by), (ax, ay)) };
+                let (top, bot) = if ay < by {
+                    ((ax, ay), (bx, by))
+                } else {
+                    ((bx, by), (ax, ay))
+                };
                 if y < top.1 || y >= bot.1 {
                     continue;
                 }
@@ -309,7 +317,12 @@ impl Canvas {
                                 self.put(cx + col, y + row as i32, c);
                             } else {
                                 self.fill(
-                                    Rect::new(cx + col * scale, y + row as i32 * scale, scale, scale),
+                                    Rect::new(
+                                        cx + col * scale,
+                                        y + row as i32 * scale,
+                                        scale,
+                                        scale,
+                                    ),
                                     c,
                                 );
                             }
@@ -329,7 +342,15 @@ impl Canvas {
     }
 
     /// Text centred horizontally in `[x, x+w)`.
-    pub(crate) fn text_center(&mut self, span: (i32, i32), y: i32, s: &[u8], c: u32, scale: i32, shadow: bool) {
+    pub(crate) fn text_center(
+        &mut self,
+        span: (i32, i32),
+        y: i32,
+        s: &[u8],
+        c: u32,
+        scale: i32,
+        shadow: bool,
+    ) {
         let (x, w) = span;
         let tw = text_w(s, scale);
         let tx = x + (w - tw) / 2;
@@ -421,7 +442,11 @@ impl Screen {
     /// Draw the arrow cursor at (x,y) directly on the framebuffer (`busy` tints it amber).
     pub(crate) unsafe fn cursor(&self, x: i32, y: i32, busy: bool) {
         let outline = self.conv(rgb(0x05, 0x07, 0x0D));
-        let fill = self.conv(if busy { rgb(0xFF, 0xB4, 0x54) } else { rgb(0xF4, 0xF8, 0xFF) });
+        let fill = self.conv(if busy {
+            rgb(0xFF, 0xB4, 0x54)
+        } else {
+            rgb(0xF4, 0xF8, 0xFF)
+        });
         for (dy, row) in CURSOR.iter().enumerate() {
             for (dx, &b) in row.iter().enumerate() {
                 let px = x + dx as i32;

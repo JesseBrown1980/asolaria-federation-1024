@@ -11,7 +11,7 @@ use crate::console::{self, Action, Ctx, Sink, Tone};
 use crate::gfx::{mix, rgb, text_w, Canvas, Rect, Screen, CURSOR_H, CURSOR_W};
 use crate::pointer::Pointers;
 use crate::rtc::{self, BootTime};
-use crate::uefi::{Bs, BootServices, Guid};
+use crate::uefi::{BootServices, Bs, Guid};
 use core::ffi::c_void;
 
 const GOP_GUID: Guid = Guid {
@@ -133,9 +133,21 @@ pub(crate) unsafe fn run(c: &mut Ctx) {
         return;
     }
     let info = &*m.info;
-    // fmt 2 (bit masks) and 3 (Blt only) have no directly writable RGB/BGR framebuffer.
-    if info.fmt >= 2 || info.w < 640 || info.h < 480 {
-        crate::serial_print(b"  GUI|op=unavailable|why=pixel_format_or_size|json=0\r\n");
+    // Usable formats: 0 RGBx, 1 BGRx, and 2 (bit masks) when the masks are byte-aligned 8-8-8
+    // in one of those two orders. 3 (Blt only) has no linear framebuffer.
+    let Some(fmt) = effective_fmt(info.fmt, &info.masks) else {
+        crate::serial_print(b"  GUI|op=unavailable|why=pixel_format|json=0\r\n");
+        return;
+    };
+    if info.w < 640 || info.h < 480 {
+        crate::serial_print(b"  GUI|op=unavailable|why=size|json=0\r\n");
+        return;
+    }
+    // The framebuffer must hold every row we will write: stride >= width and
+    // size >= stride * height * 4 bytes.
+    let need = info.pps as u64 * info.h as u64 * 4;
+    if info.pps < info.w || (m.fb_size as u64) < need {
+        crate::serial_print(b"  GUI|op=unavailable|why=framebuffer_geometry|json=0\r\n");
         return;
     }
     let (w, h) = (info.w as i32, info.h as i32);
@@ -146,8 +158,10 @@ pub(crate) unsafe fn run(c: &mut Ctx) {
     let wall = bs
         .alloc_slice::<u32>((w * h) as usize, 0)
         .map(|px| Canvas::new(px, w, h));
-    let (Some(cells), Some(tones)) = (bs.alloc_slice::<u8>(COLS * ROWS, b' '), bs.alloc_slice::<u8>(COLS * ROWS, 0))
-    else {
+    let (Some(cells), Some(tones)) = (
+        bs.alloc_slice::<u8>(COLS * ROWS, b' '),
+        bs.alloc_slice::<u8>(COLS * ROWS, 0),
+    ) else {
         crate::serial_print(b"  GUI|op=unavailable|why=no_memory|json=0\r\n");
         return;
     };
@@ -156,7 +170,7 @@ pub(crate) unsafe fn run(c: &mut Ctx) {
         pps: info.pps as i32,
         w,
         h,
-        fmt: info.fmt,
+        fmt,
     };
     let ptr = Pointers::find(bs, (*c.st).console_in_handle);
     let mem = bs.memory_totals();
@@ -173,7 +187,11 @@ pub(crate) unsafe fn run(c: &mut Ctx) {
             if ch == 0 {
                 break;
             }
-            fw[fw_len] = if (0x20..0x7F).contains(&ch) { ch as u8 } else { b'?' };
+            fw[fw_len] = if (0x20..0x7F).contains(&ch) {
+                ch as u8
+            } else {
+                b'?'
+            };
             fw_len += 1;
         }
     }
@@ -239,6 +257,20 @@ pub(crate) unsafe fn run(c: &mut Ctx) {
     d.event_loop();
 }
 
+/// Map a GOP pixel format to the two layouts `Screen` writes (0 = RGBx, 1 = BGRx).
+/// PixelBitMask (2) qualifies only when its masks are exactly one of those byte layouts.
+fn effective_fmt(fmt: u32, masks: &[u32; 4]) -> Option<u32> {
+    match fmt {
+        0 | 1 => Some(fmt),
+        2 => match (masks[0], masks[1], masks[2]) {
+            (0x0000_00FF, 0x0000_FF00, 0x00FF_0000) => Some(0),
+            (0x00FF_0000, 0x0000_FF00, 0x0000_00FF) => Some(1),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// If the firmware left a small mode (< 1024 wide), switch to the largest mode that is at most
 /// 1920x1200 so the desktop has room. Never touches a mode that is already >= 1024 wide.
 unsafe fn pick_mode(bs: Bs, gop: *mut Gop) {
@@ -253,9 +285,10 @@ unsafe fn pick_mode(bs: Bs, gop: *mut Gop) {
         if ((*gop).query_mode)(gop, i, &mut sz, &mut inf) != 0 || inf.is_null() {
             continue;
         }
-        let (w, h, f) = ((*inf).w, (*inf).h, (*inf).fmt);
+        let (w, h) = ((*inf).w, (*inf).h);
+        let ok = effective_fmt((*inf).fmt, &(*inf).masks).is_some();
         bs.free(inf as *mut c_void);
-        if f < 2 && w <= 1920 && h <= 1200 && w >= 1024 {
+        if ok && w <= 1920 && h <= 1200 && w >= 1024 {
             let area = w * h;
             if best.map_or(true, |(_, a)| area > a) {
                 best = Some((i, area));
@@ -305,8 +338,16 @@ fn draw_wallpaper(cv: &mut Canvas) {
     let (cx, cy, s) = (w * 72 / 100, h * 40 / 100, h * 19 / 100);
     apps::iso_cube(cv, cx, cy, s, 64, rgb(0x2c, 0x7a, 0x90));
     let ty = cy + s + 34;
-    cv.text_center((cx - 400, 800), ty, b"ASOLARIA ASI OS", rgb(0x9a, 0xf3, 0xea), 3, true);
-    cv.text_center((cx - 400, 800),
+    cv.text_center(
+        (cx - 400, 800),
+        ty,
+        b"ASOLARIA ASI OS",
+        rgb(0x9a, 0xf3, 0xea),
+        3,
+        true,
+    );
+    cv.text_center(
+        (cx - 400, 800),
         ty + 58,
         b"balanced-ternary kernel  .  27 = 3^3  .  integer only  .  E=0",
         rgb(0x6f, 0x86, 0xa8),
@@ -323,19 +364,35 @@ impl Desk<'_, '_> {
     fn log_ready(&self) {
         let mut b = Buf::new();
         let (ns, na) = self.ptr.counts();
-        b.s(b"  GUI|op=ready|w=").dec(self.scr.w as u64).s(b"|h=").dec(self.scr.h as u64);
-        b.s(b"|fmt=").dec(self.scr.fmt as u64).s(b"|ptr_simple=").dec(ns as u64);
-        b.s(b"|ptr_abs=").dec(na as u64).s(b"|handles=").dec(self.ptr.simple_handles as u64);
+        b.s(b"  GUI|op=ready|w=")
+            .dec(self.scr.w as u64)
+            .s(b"|h=")
+            .dec(self.scr.h as u64);
+        b.s(b"|fmt=")
+            .dec(self.scr.fmt as u64)
+            .s(b"|ptr_simple=")
+            .dec(ns as u64);
+        b.s(b"|ptr_abs=")
+            .dec(na as u64)
+            .s(b"|handles=")
+            .dec(self.ptr.simple_handles as u64);
         b.s(b"/").dec(self.ptr.abs_handles as u64).s(b"|splitter=");
-        b.dec(self.ptr.via_splitter as u64).s(b"|phys=").dec(self.ptr.phys as u64);
-        b.s(b"|usb_connect=").dec(self.ptr.connected_usb as u64).s(b"|ps2=");
+        b.dec(self.ptr.via_splitter as u64)
+            .s(b"|phys=")
+            .dec(self.ptr.phys as u64);
+        b.s(b"|usb_connect=")
+            .dec(self.ptr.connected_usb as u64)
+            .s(b"|ps2=");
         b.s(match self.ptr.ps2_probe {
             None => b"not_needed",
             Some(crate::ps2mouse::Probe::Ready) => b"ready",
             Some(crate::ps2mouse::Probe::NoAck) => b"no_ack",
             Some(crate::ps2mouse::Probe::NoController) => b"no_controller",
         });
-        b.s(b"|tsc_khz=").dec(self.tpms).s(b"|e=0|json=0").raw(b"\r\n");
+        b.s(b"|tsc_khz=")
+            .dec(self.tpms)
+            .s(b"|e=0|json=0")
+            .raw(b"\r\n");
         // SAFETY: COM1 port I/O.
         unsafe { crate::serial_print(b.get()) };
     }
@@ -356,7 +413,12 @@ impl Desk<'_, '_> {
 
     fn log(&self, op: &[u8], what: &[u8]) {
         let mut b = Buf::new();
-        b.s(b"  GUI|op=").s(op).s(b"|").s(what).s(b"|json=0").raw(b"\r\n");
+        b.s(b"  GUI|op=")
+            .s(op)
+            .s(b"|")
+            .s(what)
+            .s(b"|json=0")
+            .raw(b"\r\n");
         // SAFETY: COM1 port I/O.
         unsafe { crate::serial_print(b.get()) };
     }
@@ -440,7 +502,10 @@ impl Desk<'_, '_> {
         if self.desk_focus {
             return None;
         }
-        (0..self.nz).rev().map(|k| self.z[k]).find(|&a| !self.wins[a].min)
+        (0..self.nz)
+            .rev()
+            .map(|k| self.z[k])
+            .find(|&a| !self.wins[a].min)
     }
 
     fn hit(&self, x: i32, y: i32) -> Hit {
@@ -622,7 +687,14 @@ impl Desk<'_, '_> {
         let now = self.now_ms();
         match self.confirm {
             Some((k, t)) if k == kind && now.wrapping_sub(t) < 8000 => {
-                self.log(b"reset", if kind == 0 { b"kind=restart" } else { b"kind=poweroff" });
+                self.log(
+                    b"reset",
+                    if kind == 0 {
+                        b"kind=restart"
+                    } else {
+                        b"kind=poweroff"
+                    },
+                );
                 // SAFETY: firmware runtime services; returns only if the reset was ignored.
                 unsafe { self.c.reset(kind) };
                 self.term.tone(Tone::Error);
@@ -641,9 +713,13 @@ impl Desk<'_, '_> {
         self.log(b"text_mode", b"enter");
         // SAFETY: firmware ConOut/ConIn, boot services active.
         unsafe {
+            self.ptr.suspend();
             console::text_console(self.c);
             self.c.text_cursor(false);
+            self.ptr.resume();
         }
+        self.btn = false;
+        self.drag = None;
         self.log(b"text_mode", b"leave");
         self.mark_all();
     }
@@ -879,7 +955,12 @@ impl Desk<'_, '_> {
                 self.kheld = !self.kheld;
                 self.pointer(self.mx, self.my, self.kheld, 0);
             } else if sc == 0x09 || sc == 0x0A {
-                self.pointer(self.mx, self.my, self.kheld, if sc == 0x09 { 1 } else { -1 });
+                self.pointer(
+                    self.mx,
+                    self.my,
+                    self.kheld,
+                    if sc == 0x09 { 1 } else { -1 },
+                );
             }
             return;
         }
@@ -924,7 +1005,9 @@ impl Desk<'_, '_> {
                     }
                     (_, 0x0D) => return self.run_command(),
                     (_, 0x08) => self.term.ilen = self.term.ilen.saturating_sub(1),
-                    (_, c) if (0x20..0x7F).contains(&c) && self.term.ilen < self.term.input.len() => {
+                    (_, c)
+                        if (0x20..0x7F).contains(&c) && self.term.ilen < self.term.input.len() =>
+                    {
                         self.term.input[self.term.ilen] = c as u8;
                         self.term.ilen += 1;
                     }
@@ -944,9 +1027,9 @@ impl Desk<'_, '_> {
                 _ => {}
             },
             App::Power => match ch | 0x20 {
-                0x72 => self.power(0),               // 'r'
-                0x70 => self.power(2),               // 'p'
-                0x74 => self.text_mode(),            // 't'
+                0x72 => self.power(0),    // 'r'
+                0x70 => self.power(2),    // 'p'
+                0x74 => self.text_mode(), // 't'
                 0x2D if ch == 0x0D => {
                     // Enter: confirm whatever is pending.
                     if let Some((k, _)) = self.confirm {
@@ -987,7 +1070,8 @@ impl Desk<'_, '_> {
             }
             apps::draw_icon(&mut self.cv, *app, cell.x + 26, cell.y + 8);
             let col = if selected { apps::WHITE } else { apps::TEXT };
-            self.cv.text_center((cell.x, cell.w), cell.y + 64, app.name(), col, 1, true);
+            self.cv
+                .text_center((cell.x, cell.w), cell.y + 64, app.name(), col, 1, true);
         }
         // Windows, bottom to top.
         let top = self.focused();
@@ -1012,9 +1096,28 @@ impl Desk<'_, '_> {
         let w = self.wins[a];
         let r = w.r;
         let cv = &mut self.cv;
-        cv.round(Rect::new(r.x + 3, r.y + 8, r.w + 4, r.h + 4), 14, apps::BLACK, 60);
-        cv.round(Rect::new(r.x + 1, r.y + 3, r.w + 2, r.h + 2), 12, apps::BLACK, 70);
-        cv.round(r, 10, if focused { mix(apps::LINE, app.color(), 90) } else { apps::LINE }, 256);
+        cv.round(
+            Rect::new(r.x + 3, r.y + 8, r.w + 4, r.h + 4),
+            14,
+            apps::BLACK,
+            60,
+        );
+        cv.round(
+            Rect::new(r.x + 1, r.y + 3, r.w + 2, r.h + 2),
+            12,
+            apps::BLACK,
+            70,
+        );
+        cv.round(
+            r,
+            10,
+            if focused {
+                mix(apps::LINE, app.color(), 90)
+            } else {
+                apps::LINE
+            },
+            256,
+        );
         cv.round(r.inset(1), 9, apps::PANEL, 256);
         let (t0, t1) = if focused {
             (rgb(0x22, 0x31, 0x55), rgb(0x14, 0x1e, 0x36))
@@ -1032,12 +1135,30 @@ impl Desk<'_, '_> {
         cv.text(r.x + 32, r.y + 8, app.name(), tc, 1);
         let cr = Self::close_rect(r);
         let hov_c = self.hover == Hit::Close(a);
-        cv.round(cr, 6, if hov_c { apps::RED } else { mix(apps::PANEL2, apps::RED, 70) }, 256);
+        cv.round(
+            cr,
+            6,
+            if hov_c {
+                apps::RED
+            } else {
+                mix(apps::PANEL2, apps::RED, 70)
+            },
+            256,
+        );
         cv.line_w(cr.x + 8, cr.y + 5, cr.x + 15, cr.y + 12, 2, apps::WHITE);
         cv.line_w(cr.x + 15, cr.y + 5, cr.x + 8, cr.y + 12, 2, apps::WHITE);
         let mr = Self::min_rect(r);
         let hov_m = self.hover == Hit::Min(a);
-        cv.round(mr, 6, if hov_m { mix(apps::PANEL2, apps::CYAN, 110) } else { apps::PANEL2 }, 256);
+        cv.round(
+            mr,
+            6,
+            if hov_m {
+                mix(apps::PANEL2, apps::CYAN, 110)
+            } else {
+                apps::PANEL2
+            },
+            256,
+        );
         cv.fill(Rect::new(mr.x + 7, mr.y + 11, 10, 2), apps::TEXT);
         // Body, clipped to itself.
         let body = Self::body(r);
@@ -1088,7 +1209,14 @@ impl Desk<'_, '_> {
             (rgb(0x1a, 0x28, 0x46), rgb(0x0e, 0x16, 0x2a))
         };
         self.cv.round_vgrad(s, 8, a, b);
-        apps::iso_cube(&mut self.cv, s.x + 20, s.y + 16, 9, 256, rgb(0x05, 0x10, 0x18));
+        apps::iso_cube(
+            &mut self.cv,
+            s.x + 20,
+            s.y + 16,
+            9,
+            256,
+            rgb(0x05, 0x10, 0x18),
+        );
         self.cv.text(s.x + 38, s.y + 8, b"Asolaria", apps::WHITE, 1);
         // Task buttons.
         let top = self.focused();
@@ -1106,7 +1234,10 @@ impl Desk<'_, '_> {
             };
             self.cv.round(r, 7, bg, 256);
             let ind = if foc { r.w - 20 } else { 18 };
-            self.cv.fill(Rect::new(r.x + (r.w - ind) / 2, r.y + r.h - 3, ind, 2), app.color());
+            self.cv.fill(
+                Rect::new(r.x + (r.w - ind) / 2, r.y + r.h - 3, ind, 2),
+                app.color(),
+            );
             self.cv.disc(r.x + 14, r.y + r.h / 2, 4, app.color());
             let tc = if min { apps::DIM } else { apps::TEXT };
             self.cv.text(r.x + 26, r.y + 8, app.name(), tc, 1);
@@ -1128,10 +1259,16 @@ impl Desk<'_, '_> {
         } else {
             (b"no mouse: F5", apps::AMBER)
         };
-        let wd_ok = matches!(self.c.wd, console::Watchdog::Disabled | console::Watchdog::Unsupported);
+        let wd_ok = matches!(
+            self.c.wd,
+            console::Watchdog::Disabled | console::Watchdog::Unsupported
+        );
         let pills: [(&[u8], u32); 3] = [
             (b"E=0", apps::GREEN),
-            (if wd_ok { b"wd off" } else { b"wd ON" }, if wd_ok { apps::GREEN } else { apps::RED }),
+            (
+                if wd_ok { b"wd off" } else { b"wd ON" },
+                if wd_ok { apps::GREEN } else { apps::RED },
+            ),
             pill_ptr,
         ];
         for (label, c) in pills.iter().rev() {
@@ -1147,7 +1284,12 @@ impl Desk<'_, '_> {
     fn draw_menu(&mut self) {
         let m = self.menu_rect();
         let cv = &mut self.cv;
-        cv.round(Rect::new(m.x + 3, m.y + 8, m.w + 4, m.h + 4), 14, apps::BLACK, 70);
+        cv.round(
+            Rect::new(m.x + 3, m.y + 8, m.w + 4, m.h + 4),
+            14,
+            apps::BLACK,
+            70,
+        );
         cv.round(m, 12, apps::LINE, 256);
         cv.round(m.inset(1), 11, rgb(0x0b, 0x11, 0x20), 256);
         cv.round_vgrad(
@@ -1174,7 +1316,8 @@ impl Desk<'_, '_> {
         for (i, label) in labels.iter().enumerate() {
             let r = self.menu_item(i);
             if i == self.menu_sel || self.hover == Hit::Menu(i) {
-                self.cv.round(r, 7, mix(rgb(0x0b, 0x11, 0x20), apps::CYAN, 60), 256);
+                self.cv
+                    .round(r, 7, mix(rgb(0x0b, 0x11, 0x20), apps::CYAN, 60), 256);
             }
             let c = if i < NAPP {
                 APPS[i].color()
@@ -1187,7 +1330,8 @@ impl Desk<'_, '_> {
             self.cv.text(r.x + 32, r.y + 6, label, apps::TEXT, 1);
         }
         let sep = self.menu_item(NAPP).y - 6;
-        self.cv.fill(Rect::new(m.x + 12, sep, m.w - 24, 1), apps::LINE);
+        self.cv
+            .fill(Rect::new(m.x + 12, sep, m.w - 24, 1), apps::LINE);
     }
 
     /// Present the dirty region and keep the cursor on top.
@@ -1215,7 +1359,9 @@ impl Desk<'_, '_> {
             // Keyboard: drain what is waiting (bounded per frame).
             for _ in 0..16 {
                 // SAFETY: firmware ConIn.
-                let Some(k) = (unsafe { self.c.key() }) else { break };
+                let Some(k) = (unsafe { self.c.key() }) else {
+                    break;
+                };
                 self.key(k.scan_code, k.unicode_char);
             }
             // Pointer devices.
@@ -1227,7 +1373,14 @@ impl Desk<'_, '_> {
                 };
                 if !self.motion_logged && (ev.dx != 0 || ev.dy != 0 || ev.abs.is_some()) {
                     self.motion_logged = true;
-                    self.log(b"pointer_first_motion", if ev.abs.is_some() { b"src=absolute" } else { b"src=simple" });
+                    let src: &[u8] = if ev.abs.is_some() {
+                        b"src=absolute"
+                    } else if self.ptr.ps2_active() {
+                        b"src=ps2"
+                    } else {
+                        b"src=simple"
+                    };
+                    self.log(b"pointer_first_motion", src);
                 }
                 let held = ev.left || (self.kptr && self.kheld);
                 self.pointer(nx, ny, held, ev.dz);
@@ -1236,7 +1389,7 @@ impl Desk<'_, '_> {
             if now.wrapping_sub(self.last_rtc) >= 250 {
                 self.last_rtc = now;
                 // SAFETY: CMOS port I/O, read-only.
-                let t = unsafe { rtc::now() };
+                let t = unsafe { rtc::now_bounded() }.unwrap_or(self.now);
                 if t.sec != self.now.sec {
                     self.now = t;
                     self.mark(self.tray_rect());

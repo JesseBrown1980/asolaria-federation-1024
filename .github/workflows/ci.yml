@@ -40,6 +40,8 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
+      - name: cargo fmt --check (kernel sub-workspace)
+        run: cargo fmt --manifest-path kernel/Cargo.toml --all -- --check
       - name: cargo check (top-level workspace)
         run: cargo check --workspace --all-features
       - name: cargo check (kernel sub-workspace)

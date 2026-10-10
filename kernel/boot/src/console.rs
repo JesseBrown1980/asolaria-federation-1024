@@ -483,6 +483,9 @@ pub(crate) unsafe fn text_console(c: &mut Ctx) {
     o.tone(Tone::Normal);
     loop {
         let Some(k) = c.key() else {
+            // Belt and braces: a mouse byte left in the i8042 output buffer would block every
+            // keyboard byte behind it (the firmware keyboard driver never reads aux bytes).
+            let _ = crate::ps2mouse::drain_aux();
             c.stall_us(10_000);
             continue;
         };

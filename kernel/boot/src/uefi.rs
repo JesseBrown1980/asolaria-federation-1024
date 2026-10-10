@@ -24,18 +24,24 @@ pub(crate) struct Guid {
 pub(crate) struct BootServices {
     hdr: EfiTableHeader,
     _tpl: [usize; 4], // 0 RaiseTPL, 1 RestoreTPL, 2 AllocatePages, 3 FreePages
-    get_memory_map: unsafe extern "efiapi" fn(*mut usize, *mut u8, *mut usize, *mut usize, *mut u32) -> usize, // 4
+    get_memory_map:
+        unsafe extern "efiapi" fn(*mut usize, *mut u8, *mut usize, *mut usize, *mut u32) -> usize, // 4
     allocate_pool: unsafe extern "efiapi" fn(u32, usize, *mut *mut c_void) -> usize, // 5
-    free_pool: unsafe extern "efiapi" fn(*mut c_void) -> usize, // 6
+    free_pool: unsafe extern "efiapi" fn(*mut c_void) -> usize,                      // 6
     _ev: [usize; 9], // 7..=15 events + protocol (un)install
     handle_protocol: unsafe extern "efiapi" fn(Handle, *const Guid, *mut *mut c_void) -> usize, // 16
-    _mid: [usize; 11], // 17..=27
+    _mid: [usize; 11],                                // 17..=27
     stall: unsafe extern "efiapi" fn(usize) -> usize, // 28
-    _wd: usize,        // 29 SetWatchdogTimer (the console owns it)
+    _wd: usize,                                       // 29 SetWatchdogTimer (the console owns it)
     connect_controller: unsafe extern "efiapi" fn(Handle, *mut Handle, *mut c_void, u8) -> usize, // 30
     _mid2: [usize; 5], // 31..=35
-    locate_handle_buffer:
-        unsafe extern "efiapi" fn(u32, *const Guid, *mut c_void, *mut usize, *mut *mut Handle) -> usize, // 36
+    locate_handle_buffer: unsafe extern "efiapi" fn(
+        u32,
+        *const Guid,
+        *mut c_void,
+        *mut usize,
+        *mut *mut Handle,
+    ) -> usize, // 36
     locate_protocol: unsafe extern "efiapi" fn(*const Guid, *mut c_void, *mut *mut c_void) -> usize, // 37
 }
 
@@ -62,7 +68,11 @@ impl Bs {
 
     /// Pool-allocate `n` elements of `T`, filled with `init`. Lives for the rest of boot
     /// (never freed: the desktop owns its buffers until reset).
-    pub(crate) unsafe fn alloc_slice<T: Copy>(&self, n: usize, init: T) -> Option<&'static mut [T]> {
+    pub(crate) unsafe fn alloc_slice<T: Copy>(
+        &self,
+        n: usize,
+        init: T,
+    ) -> Option<&'static mut [T]> {
         if !self.ok() || n == 0 {
             return None;
         }
@@ -112,7 +122,13 @@ impl Bs {
         }
         let mut n: usize = 0;
         let mut buf: *mut Handle = core::ptr::null_mut();
-        let st = ((*self.0).locate_handle_buffer)(BY_PROTOCOL, g, core::ptr::null_mut(), &mut n, &mut buf);
+        let st = ((*self.0).locate_handle_buffer)(
+            BY_PROTOCOL,
+            g,
+            core::ptr::null_mut(),
+            &mut n,
+            &mut buf,
+        );
         if st != 0 || buf.is_null() {
             return 0;
         }
@@ -142,7 +158,13 @@ impl Bs {
         let mut dsz: usize = 0;
         let mut ver: u32 = 0;
         // First call reports the size needed (EFI_BUFFER_TOO_SMALL).
-        let _ = ((*self.0).get_memory_map)(&mut size, core::ptr::null_mut(), &mut key, &mut dsz, &mut ver);
+        let _ = ((*self.0).get_memory_map)(
+            &mut size,
+            core::ptr::null_mut(),
+            &mut key,
+            &mut dsz,
+            &mut ver,
+        );
         if size == 0 {
             return None;
         }
@@ -150,7 +172,8 @@ impl Bs {
         let cap = size + 8 * 64;
         let buf = self.alloc_slice::<u8>(cap, 0)?;
         let mut size = cap;
-        let st = ((*self.0).get_memory_map)(&mut size, buf.as_mut_ptr(), &mut key, &mut dsz, &mut ver);
+        let st =
+            ((*self.0).get_memory_map)(&mut size, buf.as_mut_ptr(), &mut key, &mut dsz, &mut ver);
         if st != 0 || dsz < 32 {
             ((*self.0).free_pool)(buf.as_mut_ptr() as *mut c_void);
             return None;
@@ -161,7 +184,8 @@ impl Bs {
         while off + 32 <= size {
             let d = &buf[off..off + 32];
             let ty = u32::from_le_bytes([d[0], d[1], d[2], d[3]]);
-            let pages = u64::from_le_bytes([d[24], d[25], d[26], d[27], d[28], d[29], d[30], d[31]]);
+            let pages =
+                u64::from_le_bytes([d[24], d[25], d[26], d[27], d[28], d[29], d[30], d[31]]);
             // 7 = EfiConventionalMemory; 0 reserved, 11/12 MMIO, 13 port space are not RAM.
             if ty == 7 {
                 free += pages * 4096;

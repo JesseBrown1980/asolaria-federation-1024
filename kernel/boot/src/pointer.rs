@@ -224,6 +224,19 @@ impl Pointers {
         (self.ns, self.na)
     }
 
+    /// Quiesce the kernel PS/2 driver (before the firmware text console owns input).
+    pub(crate) unsafe fn suspend(&mut self) {
+        if let Some(p) = self.ps2.as_mut() {
+            p.suspend();
+        }
+    }
+
+    pub(crate) unsafe fn resume(&mut self) {
+        if let Some(p) = self.ps2.as_mut() {
+            p.resume();
+        }
+    }
+
     pub(crate) fn ps2_active(&self) -> bool {
         self.ps2.is_some()
     }
