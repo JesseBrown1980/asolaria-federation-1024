@@ -1,0 +1,19 @@
+[package]
+name = "hookwall-edge"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# AoT Rust port of the eight Claude Code lifecycle hooks that only PID-stamped the event
+# (posttooluse/stop/subagent-stop/notification/userprompt/session-end/precompact/
+# permissionrequest .mjs). One binary, event name as argv[1]. No node, no json, no http:
+# the stamp is appended as an HBP row to a local journal instead of POSTed to the bus.
+
+[[bin]]
+name = "hookwall-edge"
+path = "src/main.rs"
+
+[dependencies]
+sha2 = { workspace = true }

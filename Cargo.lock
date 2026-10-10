@@ -208,6 +208,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "hookwall-edge"
+version = "0.1.0"
+dependencies = [
+ "sha2",
+]
+
+[[package]]
 name = "hookwall-session-start"
 version = "0.1.0"
 
